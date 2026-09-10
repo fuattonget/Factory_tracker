@@ -361,8 +361,16 @@ Each phase past #1 is really its own future planning session.
   (boolean) is all the new schema captures for now. Can be extended later
   without a breaking migration (`supabase/schema.sql` already isolates
   coating into its own two columns for exactly this reason).
-- **`dash_app`'s fate: undecided, on purpose.** Both apps keep running
-  side by side; revisit once this system has real feature parity.
+- **`dash_app`'s data feed: single-write, `pipes` only.** Once the new
+  admin panel is the live data-entry point, it does **not** dual-write into
+  `dash_app`'s `pipe_repair_details` — `dash_app` freezes at whatever data
+  exists at cutover rather than staying live. In effect this decides
+  `dash_app`'s fate as "kept only as a frozen historical fallback," even
+  though the *general* "when do we retire dash_app" question above was
+  left open — the two answers are slightly in tension and worth being
+  aware of, but this is the more concrete, load-bearing one: it fixes the
+  entry form's save path as single-write (`pipes` table only), no
+  dash_app-shape writes anywhere in Phase 1.
 - Schema implemented in `supabase/schema.sql` — two new tables
   (`project_stage_config`, `pipes`), independent of every `dash_app` table,
   identity is a real `id` (not an Excel block position). Run once in the
@@ -372,19 +380,11 @@ Each phase past #1 is really its own future planning session.
 
 - Exact field names for the additional-part assembly + weld stages, and
   whether the raw Excel cells in the table in section 5 actually map onto
-  these stages the way hypothesized, or are genuinely separate data. Lower
-  urgency than first thought: the new entry form doesn't need to parse
-  Excel cells at all (that only matters for the phase-6 historical-import
-  module), so `pipes.additional_part_name` is free text for now and can
-  absorb whatever the real answer turns out to be.
-- **New, more urgent than the above**: once the admin panel becomes the
-  live data-entry point, should it *also* write into `dash_app`'s existing
-  `pipe_repair_details` table (in that table's own shape, so `dash_app`
-  keeps seeing fresh data and truly "runs alongside" per section 3) — or
-  does `dash_app` freeze at whatever data exists at cutover? This decides
-  whether the entry form's save path is single-write (`pipes` only) or
-  dual-write. Needs an answer before Phase 1's save logic is built, not
-  before the schema — the schema above works either way.
+  these stages the way hypothesized, or are genuinely separate data. Low
+  urgency: the new entry form doesn't need to parse Excel cells at all
+  (that only matters for the phase-6 historical-import module), so
+  `pipes.additional_part_name` is free text for now and can absorb
+  whatever the real answer turns out to be.
 
 ## 9. Reference material in this repo
 
