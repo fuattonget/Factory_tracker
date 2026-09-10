@@ -348,23 +348,43 @@ Build in this order, highest-value piece first:
 
 Each phase past #1 is really its own future planning session.
 
-## 8. Open decisions — not yet resolved
+## 8. Open decisions
 
-Do not guess at these — ask the user directly before locking in a schema
-or building UI around an assumption here:
+**Resolved (2026-09-10):**
+
+- **Admin accounts: one shared login**, not per-person. Simpler to set up;
+  no per-user audit trail (accepted trade-off — the out-of-order-stage
+  warning from section 5 still works, it just won't say *who* triggered it).
+- **Coating: a simple done/not-done flag**, not per-pipe material tracking.
+  Some pipes get multiple coating layers with different products — that
+  level of detail is real but deliberately deferred; `pipes.coating_done`
+  (boolean) is all the new schema captures for now. Can be extended later
+  without a breaking migration (`supabase/schema.sql` already isolates
+  coating into its own two columns for exactly this reason).
+- **`dash_app`'s fate: undecided, on purpose.** Both apps keep running
+  side by side; revisit once this system has real feature parity.
+- Schema implemented in `supabase/schema.sql` — two new tables
+  (`project_stage_config`, `pipes`), independent of every `dash_app` table,
+  identity is a real `id` (not an Excel block position). Run once in the
+  Supabase SQL Editor, same project `dash_app` uses.
+
+**Still open — do not guess, ask the user directly:**
 
 - Exact field names for the additional-part assembly + weld stages, and
   whether the raw Excel cells in the table in section 5 actually map onto
-  these stages the way hypothesized, or are genuinely separate data.
-- Whether coating *material* (e.g. `"Carbozinc 11"`) is tracked per-pipe,
-  or only as the project-level rollup the screenshot showed.
-- Admin accounts: one shared login, or a named account per person entering
-  data (affects audit-trail quality — who entered what, useful for
-  reconciling the kind of out-of-order-report situations section 5
-  describes).
-- Whether `dash_app` is ever fully retired, or kept indefinitely as a
-  read-only fallback / PDF-export tool even once this system covers
-  everything.
+  these stages the way hypothesized, or are genuinely separate data. Lower
+  urgency than first thought: the new entry form doesn't need to parse
+  Excel cells at all (that only matters for the phase-6 historical-import
+  module), so `pipes.additional_part_name` is free text for now and can
+  absorb whatever the real answer turns out to be.
+- **New, more urgent than the above**: once the admin panel becomes the
+  live data-entry point, should it *also* write into `dash_app`'s existing
+  `pipe_repair_details` table (in that table's own shape, so `dash_app`
+  keeps seeing fresh data and truly "runs alongside" per section 3) — or
+  does `dash_app` freeze at whatever data exists at cutover? This decides
+  whether the entry form's save path is single-write (`pipes` only) or
+  dual-write. Needs an answer before Phase 1's save logic is built, not
+  before the schema — the schema above works either way.
 
 ## 9. Reference material in this repo
 
