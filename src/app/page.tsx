@@ -1,12 +1,21 @@
 import { SummaryCard } from "@/components/SummaryCard";
 import { NewestPipesTable } from "@/components/NewestPipesTable";
-import { RepairRateTrendChart, DailyRepairAmountChart, ProductionTypeTrendChart } from "./DashboardCharts";
+import {
+  RepairRateTrendChart,
+  DailyRepairAmountChart,
+  ProductionTypeTrendChart,
+  RepairAmountParetoChart,
+  RepairRatioParetoChart,
+} from "./DashboardCharts";
 import {
   loadMasterData,
   dailyWeightedRepairRatios,
   repairAmountTrendData,
   productionTypeTrendSeries,
   summarize,
+  getLatestDayRows,
+  repairAmountPareto,
+  repairRatioPareto,
 } from "@/lib/dashboard";
 import { loadPipeRepairDetails, loadProjectSheetLinks, buildPipeOverview } from "@/lib/pipeOverview";
 
@@ -38,6 +47,9 @@ export default async function Dashboard() {
   const typeTrend = productionTypeTrendSeries(rows);
   const summary = summarize(rows, ratios);
   const pipeOverview = buildPipeOverview(pipes, links);
+  const latestDayRows = getLatestDayRows(rows);
+  const amountPareto = repairAmountPareto(latestDayRows);
+  const ratioPareto = repairRatioPareto(latestDayRows);
 
   return (
     <main className="min-h-screen bg-slate-50 px-4 py-10 sm:px-8">
@@ -65,6 +77,11 @@ export default async function Dashboard() {
 
         <div className="mt-5">
           <DailyRepairAmountChart data={amounts} />
+        </div>
+
+        <div className="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-2">
+          <RepairAmountParetoChart data={amountPareto} />
+          <RepairRatioParetoChart data={ratioPareto} />
         </div>
 
         {(pipeOverview.newestProduced || pipeOverview.newestRepaired) && (

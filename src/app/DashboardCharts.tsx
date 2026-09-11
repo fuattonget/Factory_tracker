@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Plot from "@/components/Plot";
-import type { DailyAmountPoint, DailyRatioPoint, ProductionTypeTrendSeries } from "@/lib/dashboard";
+import type { DailyAmountPoint, DailyRatioPoint, ProductionTypeTrendSeries, ParetoPoint } from "@/lib/dashboard";
 
 const PRIMARY = "#2563eb"; // matches dash_app's --color-primary, single-series charts need no legend/second hue
 const AXIS_TEXT = "#64748b";
@@ -233,5 +233,107 @@ export function ProductionTypeTrendChart({ series }: { series: ProductionTypeTre
         />
       )}
     </div>
+  );
+}
+
+// Pareto charts are one of the few universally-recognized, legitimate uses
+// of a dual y-axis -- the cumulative-% line has a fixed, self-explanatory
+// 0-100 range that reads as an overlay on the bars, not a second unrelated
+// measurement competing for the same axis. dash_app already uses this
+// convention; kept for parity rather than reinvented.
+function ParetoChart({
+  title,
+  data,
+  valueLabel,
+  hoverValueFormat,
+}: {
+  title: string;
+  data: ParetoPoint[];
+  valueLabel: string;
+  hoverValueFormat: string; // a Plotly/d3 number format spec, e.g. ".2f" or ".2%"
+}) {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <h2 className="mb-3 text-sm font-semibold text-slate-700">{title}</h2>
+      <Plot
+        data={[
+          {
+            type: "bar",
+            name: valueLabel,
+            x: data.map((d) => d.label),
+            y: data.map((d) => d.value),
+            marker: { color: PRIMARY },
+            hovertemplate: `%{x}<br>${valueLabel}: <b>%{y:${hoverValueFormat}}</b><extra></extra>`,
+          },
+          {
+            type: "scatter",
+            mode: "lines+markers",
+            name: "Cumulative %",
+            x: data.map((d) => d.label),
+            y: data.map((d) => d.cumulativePct),
+            yaxis: "y2",
+            line: { color: COLOR_MIX, width: 2 },
+            marker: { size: 6, color: COLOR_MIX },
+            hovertemplate: "%{x}<br>Cumulative: <b>%{y:.2f}%</b><extra></extra>",
+          },
+        ]}
+        layout={{
+          autosize: true,
+          margin: { l: 56, r: 48, t: 8, b: 110 },
+          plot_bgcolor: "white",
+          paper_bgcolor: "white",
+          font: baseFont,
+          hoverlabel: { bgcolor: "white", bordercolor: BORDER_LINE, font: { color: "#1e293b", size: 12 } },
+          showlegend: true,
+          legend: { orientation: "h", y: 1.12, x: 1, xanchor: "right" },
+          xaxis: {
+            showgrid: false,
+            tickangle: -45,
+            tickfont: { size: 10, color: AXIS_TEXT },
+            linecolor: BORDER_LINE,
+          },
+          yaxis: {
+            title: { text: valueLabel },
+            showgrid: true,
+            gridcolor: GRID_LINE,
+            zeroline: false,
+            tickfont: { size: 11, color: AXIS_TEXT },
+          },
+          yaxis2: {
+            title: { text: "Cumulative %" },
+            overlaying: "y",
+            side: "right",
+            range: [0, 105],
+            showgrid: false,
+            tickfont: { size: 11, color: AXIS_TEXT },
+          },
+        }}
+        config={config}
+        style={{ width: "100%", height: "400px" }}
+        useResizeHandler
+      />
+    </div>
+  );
+}
+
+export function RepairAmountParetoChart({ data }: { data: ParetoPoint[] }) {
+  return (
+    <ParetoChart
+      title="Repair Amount Pareto — Cumulative Contribution (ft, Latest Day)"
+      data={data}
+      valueLabel="Repair Amount (ft)"
+      hoverValueFormat=".2f"
+    />
+  );
+}
+
+export function RepairRatioParetoChart({ data }: { data: ParetoPoint[] }) {
+  return (
+    <ParetoChart
+      title="Repair Ratio Pareto — Cumulative Contribution (Latest Day)"
+      data={data.map((d) => ({ ...d, value: d.value * 100 }))}
+      valueLabel="Repair Ratio (%)"
+      hoverValueFormat=".2f"
+    />
   );
 }
