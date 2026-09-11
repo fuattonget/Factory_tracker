@@ -148,6 +148,7 @@ export function PipeGrid({
   const [rows, setRows] = useState<GridRow[]>(() => initialPipes.map(pipeToRow));
   const [saving, setSaving] = useState(false);
   const [warningsByRow, setWarningsByRow] = useState<Record<string, string[]>>({});
+  const [errorsByRow, setErrorsByRow] = useState<Record<string, string[]>>({});
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<Date | null>(null);
 
@@ -223,15 +224,17 @@ export function PipeGrid({
       const { results } = await res.json();
 
       const nextWarnings: Record<string, string[]> = {};
+      const nextErrors: Record<string, string[]> = {};
       results.forEach((r: { ok: boolean; warnings?: string[]; error?: string }, i: number) => {
         const rowId = payload[i].rowId;
         if (r.ok) {
           if (r.warnings && r.warnings.length > 0) nextWarnings[rowId] = r.warnings;
         } else {
-          nextWarnings[rowId] = [`Kaydedilemedi: ${r.error}`];
+          nextErrors[rowId] = [r.error ?? "Bilinmeyen hata"];
         }
       });
       setWarningsByRow(nextWarnings);
+      setErrorsByRow(nextErrors);
       setSavedAt(new Date());
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : String(err));
@@ -241,6 +244,7 @@ export function PipeGrid({
   }
 
   const allWarnings = Object.entries(warningsByRow);
+  const allErrors = Object.entries(errorsByRow);
 
   return (
     <div>
@@ -261,9 +265,25 @@ export function PipeGrid({
         style={{ blockSize: 480 }}
       />
 
+      {allErrors.length > 0 && (
+        <div style={{ marginTop: "1rem", padding: "0.75rem", background: "#fdecea", border: "1px solid #d32f2f" }}>
+          <strong>Kaydedilmedi (bu satırlar veritabanına yazılmadı, değeri düzeltip tekrar kaydedin):</strong>
+          <ul>
+            {allErrors.map(([rowId, errors]) => {
+              const row = rows.find((r) => r.rowId === rowId);
+              return errors.map((e, i) => (
+                <li key={`${rowId}-${i}`}>
+                  Pipe {row?.pipe_no || "(no.)"}: {e}
+                </li>
+              ));
+            })}
+          </ul>
+        </div>
+      )}
+
       {allWarnings.length > 0 && (
         <div style={{ marginTop: "1rem", padding: "0.75rem", background: "#fff8e1", border: "1px solid #e0c060" }}>
-          <strong>Uyarılar (kayıt engellenmedi, sadece bilgi amaçlı):</strong>
+          <strong>Uyarılar (kaydedildi, sadece bilgi amaçlı):</strong>
           <ul>
             {allWarnings.map(([rowId, warnings]) => {
               const row = rows.find((r) => r.rowId === rowId);

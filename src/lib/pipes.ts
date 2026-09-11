@@ -113,12 +113,87 @@ export function computeStageWarnings(
   return warnings;
 }
 
+// Field-level validation -- this is the actual point of the rewrite (see
+// PROJECT_PLAN.md section 1 and 6): a value that's structurally wrong (not
+// a number, not a real date, a ratio outside 0-1) gets REJECTED before it
+// reaches the database, the same way dash_app's validators.py should have
+// caught the M35 "incl. skelp smaller than the base amount" typo at entry
+// time instead of at import time. This is deliberately separate from
+// computeStageWarnings above: a warning means "this is plausible but
+// unusual, saved anyway"; a validation error here means "this value can't
+// be true," and blocks the save entirely.
+const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function isValidDateString(s: string): boolean {
+  return DATE_RE.test(s) && !Number.isNaN(Date.parse(s));
+}
+
+export class PipeValidationError extends Error {
+  constructor(public readonly fieldErrors: string[]) {
+    super(fieldErrors.join(" "));
+    this.name = "PipeValidationError";
+  }
+}
+
+export function validatePipeInput(input: PipeInput): string[] {
+  const errors: string[] = [];
+
+  if (!Number.isInteger(input.pipe_no) || input.pipe_no <= 0) {
+    errors.push("Pipe No pozitif bir tam sayı olmalı.");
+  }
+  if (!input.produced_date || !isValidDateString(input.produced_date)) {
+    errors.push("Produced Date geçerli bir tarih olmalı (YYYY-MM-DD).");
+  }
+
+  const dateFields: [string, string | null][] = [
+    ["Repaired Date", input.repaired_date],
+    ["Additional Part Assembled Date", input.additional_part_assembled_date],
+    ["Additional Part Welded Date", input.additional_part_welded_date],
+    ["Coating Date", input.coating_date],
+    ["Shipped Date", input.shipped_date],
+  ];
+  for (const [label, value] of dateFields) {
+    if (value != null && !isValidDateString(value)) {
+      errors.push(`${label} geçerli bir tarih olmalı (YYYY-MM-DD).`);
+    }
+  }
+
+  if (input.pipe_length_ft != null && (Number.isNaN(input.pipe_length_ft) || input.pipe_length_ft < 0)) {
+    errors.push("Length (ft) negatif olamaz.");
+  }
+  if (input.repair_amount != null && (Number.isNaN(input.repair_amount) || input.repair_amount < 0)) {
+    errors.push("Repair Amt negatif olamaz.");
+  }
+  if (
+    input.repair_ratio != null &&
+    (Number.isNaN(input.repair_ratio) || input.repair_ratio < 0 || input.repair_ratio > 1)
+  ) {
+    errors.push("Repair Ratio 0 ile 1 arasında olmalı (örn. %5 için 0.05).");
+  }
+  if (input.repair_count != null && (!Number.isInteger(input.repair_count) || input.repair_count < 0)) {
+    errors.push("Repair Count negatif olmayan bir tam sayı olmalı.");
+  }
+  if (
+    input.additional_part_qty != null &&
+    (!Number.isInteger(input.additional_part_qty) || input.additional_part_qty < 0)
+  ) {
+    errors.push("Part Qty negatif olmayan bir tam sayı olmalı.");
+  }
+
+  return errors;
+}
+
 export interface UpsertPipeResult {
   pipe: Pipe;
   warnings: string[];
 }
 
 export async function upsertPipe(input: PipeInput): Promise<UpsertPipeResult> {
+  const fieldErrors = validatePipeInput(input);
+  if (fieldErrors.length > 0) {
+    throw new PipeValidationError(fieldErrors);
+  }
+
   const config = await getProjectStageConfig(input.project_no);
   const effectiveConfig = config ?? {
     project_no: input.project_no,
