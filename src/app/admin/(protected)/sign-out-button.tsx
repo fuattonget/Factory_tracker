@@ -13,5 +13,12 @@ export function SignOutButton() {
     router.refresh();
   }
 
-  return <button onClick={handleSignOut}>Çıkış yap</button>;
+  return (
+    <button
+      onClick={handleSignOut}
+      className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900"
+    >
+      Çıkış yap
+    </button>
+  );
 }

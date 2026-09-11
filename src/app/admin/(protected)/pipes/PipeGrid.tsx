@@ -111,11 +111,14 @@ function rowToPipeInput(row: GridRow, projectNo: string): PipeInput | null {
 
 function CheckboxCell({ row, onRowChange }: { row: GridRow; onRowChange: (r: GridRow) => void }) {
   return (
-    <input
-      type="checkbox"
-      checked={row.coating_done}
-      onChange={(e) => onRowChange({ ...row, coating_done: e.target.checked })}
-    />
+    <div className="flex h-full items-center justify-center">
+      <input
+        type="checkbox"
+        checked={row.coating_done}
+        onChange={(e) => onRowChange({ ...row, coating_done: e.target.checked })}
+        className="h-4 w-4 rounded border-slate-300 accent-blue-600"
+      />
+    </div>
   );
 }
 
@@ -128,7 +131,7 @@ function StatusEditor({ row, onRowChange, onClose }: { row: GridRow; onRowChange
         onRowChange({ ...row, status: e.target.value as GridRow["status"] });
       }}
       onBlur={() => onClose(true)}
-      style={{ width: "100%", height: "100%" }}
+      className="h-full w-full border-none bg-white px-2 text-sm outline-none"
     >
       <option value="Produced">Produced</option>
       <option value="Repaired">Repaired</option>
@@ -248,27 +251,56 @@ export function PipeGrid({
 
   return (
     <div>
-      <div style={{ display: "flex", gap: "0.5rem", marginBottom: "0.5rem" }}>
-        <button onClick={addRow}>+ Yeni satır</button>
-        <button onClick={handleSave} disabled={saving}>
+      <div className="mb-3 flex flex-wrap items-center gap-3">
+        <button
+          onClick={addRow}
+          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50"
+        >
+          + Yeni satır
+        </button>
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+        >
           {saving ? "Kaydediliyor…" : "Kaydet"}
         </button>
-        {savedAt && <span style={{ color: "#2a2" }}>Kaydedildi ({savedAt.toLocaleTimeString()})</span>}
-        {saveError && <span style={{ color: "crimson" }}>{saveError}</span>}
+        {savedAt && (
+          <span className="flex items-center gap-1 text-sm text-emerald-600">
+            Kaydedildi ({savedAt.toLocaleTimeString()})
+          </span>
+        )}
+        {saveError && <span className="text-sm text-red-600">{saveError}</span>}
       </div>
 
-      <DataGrid
-        columns={columns}
-        rows={rows}
-        onRowsChange={handleRowsChange}
-        rowKeyGetter={(row: GridRow) => row.rowId}
-        style={{ blockSize: 480 }}
-      />
+      <div
+        className="rdg-light overflow-hidden rounded-xl border border-slate-200"
+        style={
+          {
+            "--rdg-border-color": "#e2e8f0",
+            "--rdg-header-background-color": "#f8fafc",
+            "--rdg-row-hover-background-color": "#eff6ff",
+            "--rdg-selection-color": "#2563eb",
+            "--rdg-color": "#1e293b",
+            "--rdg-font-size": "13px",
+          } as React.CSSProperties
+        }
+      >
+        <DataGrid
+          columns={columns}
+          rows={rows}
+          onRowsChange={handleRowsChange}
+          rowKeyGetter={(row: GridRow) => row.rowId}
+          style={{ blockSize: 480, border: "none" }}
+        />
+      </div>
 
       {allErrors.length > 0 && (
-        <div style={{ marginTop: "1rem", padding: "0.75rem", background: "#fdecea", border: "1px solid #d32f2f" }}>
-          <strong>Kaydedilmedi (bu satırlar veritabanına yazılmadı, değeri düzeltip tekrar kaydedin):</strong>
-          <ul>
+        <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4">
+          <p className="text-sm font-semibold text-red-700">
+            Kaydedilmedi — bu satırlar veritabanına yazılmadı, değeri düzeltip tekrar kaydedin
+          </p>
+          <ul className="mt-2 space-y-1 text-sm text-red-700">
             {allErrors.map(([rowId, errors]) => {
               const row = rows.find((r) => r.rowId === rowId);
               return errors.map((e, i) => (
@@ -282,9 +314,9 @@ export function PipeGrid({
       )}
 
       {allWarnings.length > 0 && (
-        <div style={{ marginTop: "1rem", padding: "0.75rem", background: "#fff8e1", border: "1px solid #e0c060" }}>
-          <strong>Uyarılar (kaydedildi, sadece bilgi amaçlı):</strong>
-          <ul>
+        <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
+          <p className="text-sm font-semibold text-amber-700">Uyarılar — kaydedildi, sadece bilgi amaçlı</p>
+          <ul className="mt-2 space-y-1 text-sm text-amber-700">
             {allWarnings.map(([rowId, warnings]) => {
               const row = rows.find((r) => r.rowId === rowId);
               return warnings.map((w, i) => (
