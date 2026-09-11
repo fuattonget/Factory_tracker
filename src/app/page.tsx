@@ -1,9 +1,10 @@
 import { SummaryCard } from "@/components/SummaryCard";
-import { RepairRateTrendChart, DailyRepairAmountChart } from "./DashboardCharts";
+import { RepairRateTrendChart, DailyRepairAmountChart, ProductionTypeTrendChart } from "./DashboardCharts";
 import {
   loadMasterData,
   dailyWeightedRepairRatios,
   repairAmountTrendData,
+  productionTypeTrendSeries,
   summarize,
 } from "@/lib/dashboard";
 
@@ -28,6 +29,7 @@ export default async function Dashboard() {
 
   const ratios = dailyWeightedRepairRatios(rows);
   const amounts = repairAmountTrendData(rows);
+  const typeTrend = productionTypeTrendSeries(rows);
   const summary = summarize(rows, ratios);
 
   return (
@@ -51,6 +53,10 @@ export default async function Dashboard() {
 
         <div className="mt-6 grid grid-cols-1 gap-5 lg:grid-cols-2">
           <RepairRateTrendChart data={ratios} />
+          <ProductionTypeTrendChart series={typeTrend} />
+        </div>
+
+        <div className="mt-5">
           <DailyRepairAmountChart data={amounts} />
         </div>
       </div>

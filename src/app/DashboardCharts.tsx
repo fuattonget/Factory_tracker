@@ -1,12 +1,20 @@
 "use client";
 
+import { useState } from "react";
 import Plot from "@/components/Plot";
-import type { DailyAmountPoint, DailyRatioPoint } from "@/lib/dashboard";
+import type { DailyAmountPoint, DailyRatioPoint, ProductionTypeTrendSeries } from "@/lib/dashboard";
 
 const PRIMARY = "#2563eb"; // matches dash_app's --color-primary, single-series charts need no legend/second hue
 const AXIS_TEXT = "#64748b";
 const GRID_LINE = "#f1f5f9";
 const BORDER_LINE = "#e2e8f0";
+
+// Same fixed categorical assignment dash_app already ships -- reused
+// as-is for parity rather than re-derived, per the dataviz skill's own
+// "onboard an existing system's parameters" allowance.
+const COLOR_COIL = "#2563eb";
+const COLOR_PLATE = "#7c3aed";
+const COLOR_MIX = "#f97316";
 
 const baseFont = { family: "system-ui, sans-serif", color: "#1e293b" };
 
@@ -99,5 +107,131 @@ export function DailyRepairAmountChart({ data }: { data: DailyAmountPoint[] }) {
         useResizeHandler
       />
     </ChartCard>
+  );
+}
+
+type ProductionType = "Coil" | "Plate" | "Mix";
+const TYPE_OPTIONS: { value: ProductionType; label: string; color: string }[] = [
+  { value: "Coil", label: "Coil", color: COLOR_COIL },
+  { value: "Plate", label: "Plate", color: COLOR_PLATE },
+  { value: "Mix", label: "Mix (Coil + Plate)", color: COLOR_MIX },
+];
+
+export function ProductionTypeTrendChart({ series }: { series: ProductionTypeTrendSeries }) {
+  const [selected, setSelected] = useState<Set<ProductionType>>(
+    new Set(["Coil", "Plate", "Mix"])
+  );
+
+  function toggle(type: ProductionType) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(type)) next.delete(type);
+      else next.add(type);
+      return next;
+    });
+  }
+
+  // Only the last point of each series gets a text label (a "current
+  // value" callout) -- labeling every point (dash_app's original behavior)
+  // overlaps badly once >10 points share this width. See dataviz skill:
+  // "selective direct labels, never a number on every point."
+  function lastPointOnly(points: DailyRatioPoint[]): string[] {
+    return points.map((d, i) =>
+      i === points.length - 1 ? `${(d.weighted_repair_ratio * 100).toFixed(2)}%` : ""
+    );
+  }
+
+  const traces = [];
+  if (selected.has("Coil")) {
+    traces.push({
+      type: "scatter" as const,
+      mode: "lines+markers+text" as const,
+      name: "Coil",
+      x: series.coil.map((d) => d.date),
+      y: series.coil.map((d) => d.weighted_repair_ratio * 100),
+      text: lastPointOnly(series.coil),
+      textposition: "top center" as const,
+      textfont: { size: 11, color: COLOR_COIL },
+      line: { width: 2, color: COLOR_COIL },
+      marker: { size: 6, color: COLOR_COIL },
+      hovertemplate: "%{x|%d.%m.%Y}<br>Coil: <b>%{y:.2f}%</b><extra></extra>",
+    });
+  }
+  if (selected.has("Plate")) {
+    traces.push({
+      type: "scatter" as const,
+      mode: "lines+markers+text" as const,
+      name: "Plate",
+      x: series.plate.map((d) => d.date),
+      y: series.plate.map((d) => d.weighted_repair_ratio * 100),
+      text: lastPointOnly(series.plate),
+      textposition: "top center" as const,
+      textfont: { size: 11, color: COLOR_PLATE },
+      line: { width: 2, color: COLOR_PLATE },
+      marker: { size: 6, color: COLOR_PLATE },
+      hovertemplate: "%{x|%d.%m.%Y}<br>Plate: <b>%{y:.2f}%</b><extra></extra>",
+    });
+  }
+  if (selected.has("Mix")) {
+    traces.push({
+      type: "scatter" as const,
+      mode: "lines+markers+text" as const,
+      name: "Mix (Coil + Plate)",
+      x: series.mix.map((d) => d.date),
+      y: series.mix.map((d) => d.weighted_repair_ratio * 100),
+      text: lastPointOnly(series.mix),
+      textposition: "bottom center" as const,
+      textfont: { size: 11, color: COLOR_MIX },
+      line: { width: 2, color: COLOR_MIX, dash: "dash" as const },
+      marker: { size: 6, color: COLOR_MIX },
+      hovertemplate: "%{x|%d.%m.%Y}<br>Mix: <b>%{y:.2f}%</b><extra></extra>",
+    });
+  }
+
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+        <h2 className="text-sm font-semibold text-slate-700">Repair Rate Trend by Production Type</h2>
+        <div className="flex flex-wrap gap-4">
+          {TYPE_OPTIONS.map((opt) => (
+            <label key={opt.value} className="flex cursor-pointer items-center gap-1.5 text-sm text-slate-600">
+              <input
+                type="checkbox"
+                checked={selected.has(opt.value)}
+                onChange={() => toggle(opt.value)}
+                className="h-4 w-4 rounded border-slate-300"
+                style={{ accentColor: opt.color }}
+              />
+              {opt.label}
+            </label>
+          ))}
+        </div>
+      </div>
+
+      {traces.length === 0 ? (
+        <p className="py-16 text-center text-sm text-slate-400">
+          En az bir üretim tipi seçin.
+        </p>
+      ) : (
+        <Plot
+          data={traces}
+          layout={{
+            ...baseLayout,
+            showlegend: traces.length > 1,
+            legend: { orientation: "h", y: -0.2 },
+            yaxis: {
+              showgrid: true,
+              gridcolor: GRID_LINE,
+              zeroline: false,
+              ticksuffix: "%",
+              tickfont: { size: 11, color: AXIS_TEXT },
+            },
+          }}
+          config={config}
+          style={{ width: "100%", height: "420px" }}
+          useResizeHandler
+        />
+      )}
+    </div>
   );
 }
