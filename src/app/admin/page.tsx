@@ -1,9 +1,9 @@
+import Link from "next/link";
 import { listProjectStageConfigs, listPipes } from "@/lib/pipes";
 import { SignOutButton } from "./sign-out-button";
 
-// Protected by src/middleware.ts (redirects to /admin/login if there's no
-// session) -- proves auth + the new lifecycle tables work end to end.
-// Replace with the real Daily Data Entry grid once that's built.
+// Protected by src/proxy.ts (redirects to /admin/login if there's no
+// session).
 export default async function AdminHome() {
   const [stageConfigs, pipes] = await Promise.all([
     listProjectStageConfigs(),
@@ -17,17 +17,10 @@ export default async function AdminHome() {
         <SignOutButton />
       </div>
 
-      <h2>Project stage config ({stageConfigs.length})</h2>
-      <p style={{ color: "#666" }}>
-        No projects configured yet — the Daily Data Entry form (next step)
-        will let you set requires_additional_part / requires_coating per
-        project. Empty here is expected right now.
-      </p>
-
-      <h2>Pipes ({pipes.length})</h2>
-      <p style={{ color: "#666" }}>
-        Empty until the entry form starts writing to the pipes table.
-      </p>
+      <nav style={{ display: "flex", gap: "1rem", margin: "1rem 0" }}>
+        <Link href="/admin/projects">Projeler ({stageConfigs.length})</Link>
+        <Link href="/admin/pipes">Borular ({pipes.length})</Link>
+      </nav>
     </main>
   );
 }
