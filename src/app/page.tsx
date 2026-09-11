@@ -1,86 +1,59 @@
-import { createServiceRoleClient } from "@/lib/supabase/server";
+import { SummaryCard } from "@/components/SummaryCard";
+import { RepairRateTrendChart, DailyRepairAmountChart } from "./DashboardCharts";
+import {
+  loadMasterData,
+  dailyWeightedRepairRatios,
+  repairAmountTrendData,
+  summarize,
+} from "@/lib/dashboard";
 
-// Proves the server-side Supabase connection works end to end, reading the
-// exact same live data dash_app uses. Replace this page once Phase 1's real
-// admin/viewing UI exists — see PROJECT_PLAN.md.
-export default async function Home() {
-  const supabase = createServiceRoleClient();
+function formatDate(iso: string): string {
+  const [y, m, d] = iso.split("-");
+  return `${d}.${m}.${y}`;
+}
 
-  const { count: repairRatesCount, error: repairRatesError } = await supabase
-    .from("repair_rates")
-    .select("*", { count: "exact", head: true });
+export default async function Dashboard() {
+  const rows = await loadMasterData();
 
-  const { count: pipeCount, error: pipeError } = await supabase
-    .from("pipe_repair_details")
-    .select("*", { count: "exact", head: true });
+  if (rows.length === 0) {
+    return (
+      <main className="min-h-screen bg-slate-50 px-4 py-10 sm:px-8">
+        <div className="mx-auto max-w-6xl">
+          <h1 className="text-2xl font-bold text-slate-900">Factory Tracker</h1>
+          <p className="mt-4 text-slate-500">Henüz veri yok.</p>
+        </div>
+      </main>
+    );
+  }
 
-  const { data: latestRows, error: latestError } = await supabase
-    .from("repair_rates")
-    .select("date, project_no, dimensions, qty, repair_ratio")
-    .order("date", { ascending: false })
-    .limit(5);
-
-  const error = repairRatesError ?? pipeError ?? latestError;
+  const ratios = dailyWeightedRepairRatios(rows);
+  const amounts = repairAmountTrendData(rows);
+  const summary = summarize(rows, ratios);
 
   return (
-    <main style={{ padding: "2rem", fontFamily: "system-ui, sans-serif" }}>
-      <h1>Factory Tracker</h1>
-      <p style={{ color: "#666" }}>
-        Connected to the same Supabase project as dash_app. See{" "}
-        <code>PROJECT_PLAN.md</code> before building on this.
-      </p>
+    <main className="min-h-screen bg-slate-50 px-4 py-10 sm:px-8">
+      <div className="mx-auto max-w-6xl">
+        <h1 className="text-2xl font-bold text-slate-900">Factory Tracker</h1>
+        <p className="mt-1 text-sm text-slate-500">Genel Bakış / Dashboard</p>
 
-      {error ? (
-        <p style={{ color: "crimson" }}>Supabase error: {error.message}</p>
-      ) : (
-        <>
-          <ul>
-            <li>
-              <strong>repair_rates</strong> rows: {repairRatesCount}
-            </li>
-            <li>
-              <strong>pipe_repair_details</strong> rows: {pipeCount}
-            </li>
-          </ul>
+        <div className="mt-6 flex flex-wrap gap-4">
+          <SummaryCard
+            label="Last Report Date"
+            value={summary.lastReportDate ? formatDate(summary.lastReportDate) : "-"}
+          />
+          <SummaryCard label="Active Project Count" value={String(summary.activeProjectCount)} />
+          <SummaryCard
+            label="Coil and Plate Repair Rate"
+            value={`${(summary.currentOverallRatio * 100).toFixed(2)}%`}
+            accent
+          />
+        </div>
 
-          <h2>Most recent repair_rates rows</h2>
-          <table style={{ borderCollapse: "collapse" }}>
-            <thead>
-              <tr>
-                {["date", "project_no", "dimensions", "qty", "repair_ratio"].map(
-                  (h) => (
-                    <th
-                      key={h}
-                      style={{
-                        textAlign: "left",
-                        borderBottom: "1px solid #ccc",
-                        padding: "4px 12px",
-                      }}
-                    >
-                      {h}
-                    </th>
-                  )
-                )}
-              </tr>
-            </thead>
-            <tbody>
-              {latestRows?.map((row, i) => (
-                <tr key={i}>
-                  <td style={{ padding: "4px 12px" }}>{row.date}</td>
-                  <td style={{ padding: "4px 12px" }}>{row.project_no}</td>
-                  <td style={{ padding: "4px 12px" }}>{row.dimensions}</td>
-                  <td style={{ padding: "4px 12px" }}>{row.qty}</td>
-                  <td style={{ padding: "4px 12px" }}>
-                    {row.repair_ratio != null
-                      ? `${(row.repair_ratio * 100).toFixed(2)}%`
-                      : "-"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </>
-      )}
+        <div className="mt-6 grid grid-cols-1 gap-5 lg:grid-cols-2">
+          <RepairRateTrendChart data={ratios} />
+          <DailyRepairAmountChart data={amounts} />
+        </div>
+      </div>
     </main>
   );
 }
