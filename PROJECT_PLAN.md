@@ -321,16 +321,35 @@ Full feature parity with `dash_app` is the end goal, but shipping it as one
 indivisible release would take months with nothing usable in between.
 Build in this order, highest-value piece first:
 
-1. **Repo scaffold (done) + Supabase Auth + Daily Data Entry form.** The
-   actual point of this whole project. Spreadsheet-style grid UI (section
-   4), writing to a `pipe_repair_details` schema that reflects the full
-   pipe lifecycle model (section 5) — per-stage timestamps, per-project
-   stage config, warn-not-block on out-of-order stages. **This needs its
-   own dedicated schema-design conversation with the user before the
-   database migration is written** — the open questions in section 8 are
-   not optional detail, they change the shape of the core table.
-   Running alongside `dash_app` for viewing, this phase alone already
-   stops new Excel-entry errors from happening.
+1. **Repo scaffold (done) + Supabase Auth (done) + Daily Data Entry form
+   (core working, done).** The actual point of this whole project.
+   - Schema (`supabase/schema.sql`, run on the real Supabase project):
+     `project_stage_config` + `pipes`, independent of every `dash_app`
+     table, real `id` identity (not an Excel block position).
+   - Auth: shared admin login (Supabase Auth email+password), `src/proxy.ts`
+     gates `/admin/*`, invite/recovery links land on `/admin/set-password`.
+   - `/admin/projects`: per-project stage config (additional part /
+     coating on or off).
+   - `/admin/pipes`: react-data-grid spreadsheet entry, columns adapt to
+     the selected project's stage config, saves through
+     `/admin/api/pipes` → `upsertPipe`, which computes `shipped_bare` and
+     returns warn-not-block lifecycle warnings inline (never blocks a
+     save) — see `computeStageWarnings`/`deriveShippedBare` in
+     `src/lib/pipes.ts`.
+   - Verified end to end with Playwright against the live dev server and
+     the real Supabase project (login → add project → add pipe row →
+     save → confirmed the exact row in the database → cleaned up test
+     data).
+   - Still to do in this phase: numeric/date cell editors with real
+     validation instead of free-text (a "Repair Amt" that must be a
+     number, a real date picker instead of typing `YYYY-MM-DD`), a
+     bulk-paste-from-Excel path (the actual point of using a grid
+     library), and revisiting the free-text `additional_part_name` field
+     once the still-open Excel-cell-mapping question (section 8) has an
+     answer.
+   Running alongside `dash_app` for viewing (per section 8, `dash_app`
+   freezes at cutover rather than staying live), this phase alone already
+   stops new Excel-entry errors from happening once it's the daily driver.
 2. **Public Dashboard port** — the charts/tables from `dash_app`'s
    `render_dashboard`, reading whatever the entry form now writes.
 3. **Pipe Analysis port** — project trend, the day-colored sequence chart,
