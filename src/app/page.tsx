@@ -1,4 +1,5 @@
 import { SummaryCard } from "@/components/SummaryCard";
+import { NewestPipesTable } from "@/components/NewestPipesTable";
 import { RepairRateTrendChart, DailyRepairAmountChart, ProductionTypeTrendChart } from "./DashboardCharts";
 import {
   loadMasterData,
@@ -7,6 +8,7 @@ import {
   productionTypeTrendSeries,
   summarize,
 } from "@/lib/dashboard";
+import { loadPipeRepairDetails, loadProjectSheetLinks, buildPipeOverview } from "@/lib/pipeOverview";
 
 function formatDate(iso: string): string {
   const [y, m, d] = iso.split("-");
@@ -14,7 +16,11 @@ function formatDate(iso: string): string {
 }
 
 export default async function Dashboard() {
-  const rows = await loadMasterData();
+  const [rows, pipes, links] = await Promise.all([
+    loadMasterData(),
+    loadPipeRepairDetails(),
+    loadProjectSheetLinks(),
+  ]);
 
   if (rows.length === 0) {
     return (
@@ -31,6 +37,7 @@ export default async function Dashboard() {
   const amounts = repairAmountTrendData(rows);
   const typeTrend = productionTypeTrendSeries(rows);
   const summary = summarize(rows, ratios);
+  const pipeOverview = buildPipeOverview(pipes, links);
 
   return (
     <main className="min-h-screen bg-slate-50 px-4 py-10 sm:px-8">
@@ -59,6 +66,25 @@ export default async function Dashboard() {
         <div className="mt-5">
           <DailyRepairAmountChart data={amounts} />
         </div>
+
+        {(pipeOverview.newestProduced || pipeOverview.newestRepaired) && (
+          <div className="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-2">
+            {pipeOverview.newestProduced && (
+              <NewestPipesTable
+                title="Newest Produced Pipes"
+                date={pipeOverview.newestProduced.date}
+                rows={pipeOverview.newestProduced.rows}
+              />
+            )}
+            {pipeOverview.newestRepaired && (
+              <NewestPipesTable
+                title="Newest Repaired Pipes"
+                date={pipeOverview.newestRepaired.date}
+                rows={pipeOverview.newestRepaired.rows}
+              />
+            )}
+          </div>
+        )}
       </div>
     </main>
   );
