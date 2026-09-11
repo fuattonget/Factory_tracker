@@ -138,3 +138,125 @@ export function buildPipeOverview(
 
   return { newestProduced, newestRepaired };
 }
+
+// --- Backlog Trend -----------------------------------------------------
+// Ports pages/home.py:render_dashboard's daily Produced/Repaired/Backlog
+// chart -- the single most debugged feature this session (06-131's
+// block-identity instability, the dates_reliable split, the Stock-
+// undercounting and Net/Stock-inconsistency regressions it caused). See
+// PROJECT_PLAN.md section 1. Ported field-for-field from the Python.
+
+const DAILY_CHARTS_WINDOW_DAYS = 14;
+
+function addDaysISO(dateISO: string, days: number): string {
+  const d = new Date(dateISO);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function dateRangeISO(startISO: string, endISO: string): string[] {
+  const out: string[] = [];
+  for (let d = startISO; d <= endISO; d = addDaysISO(d, 1)) out.push(d);
+  return out;
+}
+
+function maxDate(dates: (string | null | undefined)[]): string | null {
+  let max: string | null = null;
+  for (const d of dates) {
+    if (d != null && (max === null || d > max)) max = d;
+  }
+  return max;
+}
+
+export interface BacklogTrendPoint {
+  date: string;
+  produced: number;
+  repaired: number;
+  /** null on padded/future days beyond the last real activity -- the
+   * stock line stops there rather than drawing a fake flat continuation. */
+  stock: number | null;
+  /** open-minus-close for this day, from the *all-confirmed* (not just
+   * trusted-dates) pipe set -- the table's "Net" column, independent of
+   * the trusted-only produced/repaired bars so the two can't disagree. */
+  net: number;
+}
+
+export function buildBacklogTrend(
+  pipes: PipeRepairDetailRow[],
+  links: ProjectSheetLink[]
+): BacklogTrendPoint[] | null {
+  const trustedMap = pipeSheetLabelMap(links, true);
+  const allMap = pipeSheetLabelMap(links, false);
+  const mapped = pipes.filter((p) => trustedMap.has(p.project_sheet));
+  const mappedAll = pipes.filter((p) => allMap.has(p.project_sheet));
+  if (mapped.length === 0) return null;
+
+  const repairedMapped = mapped.filter((p) => p.status === "Repaired");
+  const repairedMappedAll = mappedAll.filter((p) => p.status === "Repaired");
+
+  const latestActivity = maxDate([
+    ...mapped.map((p) => p.first_seen_date),
+    ...mapped.map((p) => p.repaired_date),
+  ]);
+  if (latestActivity === null) return null;
+
+  const windowStartCandidate = addDaysISO(latestActivity, -(DAILY_CHARTS_WINDOW_DAYS - 1));
+  const windowStart = windowStartCandidate > PIPE_TREND_FLOOR_DATE ? windowStartCandidate : PIPE_TREND_FLOOR_DATE;
+  if (windowStart > latestActivity) return null; // nothing on/after the floor yet
+
+  const paddedEndCandidate = addDaysISO(windowStart, DAILY_CHARTS_WINDOW_DAYS - 1);
+  const displayEnd = paddedEndCandidate > latestActivity ? paddedEndCandidate : latestActivity;
+  const dateRange = dateRangeISO(windowStart, displayEnd);
+
+  const producedDaily = new Map<string, number>();
+  for (const p of mapped) {
+    if (p.first_seen_date >= windowStart) {
+      producedDaily.set(p.first_seen_date, (producedDaily.get(p.first_seen_date) ?? 0) + 1);
+    }
+  }
+  const repairedDaily = new Map<string, number>();
+  for (const p of repairedMapped) {
+    if (p.repaired_date && p.repaired_date >= windowStart) {
+      repairedDaily.set(p.repaired_date, (repairedDaily.get(p.repaired_date) ?? 0) + 1);
+    }
+  }
+
+  // Backlog/stock: +1 the day a pipe is first seen, -1 the day it's
+  // repaired, over the pipe's *entire* history (all-confirmed set, not
+  // just trusted-dates), then cumulatively summed.
+  const netAll = new Map<string, number>();
+  for (const p of mappedAll) {
+    netAll.set(p.first_seen_date, (netAll.get(p.first_seen_date) ?? 0) + 1);
+  }
+  for (const p of repairedMappedAll) {
+    if (p.repaired_date) netAll.set(p.repaired_date, (netAll.get(p.repaired_date) ?? 0) - 1);
+  }
+  const netAllDates = [...netAll.keys()];
+  const fullHistoryStart = netAllDates.reduce((min, d) => (d < min ? d : min), netAllDates[0] ?? windowStart);
+
+  const backlogByDate = new Map<string, number>();
+  let running = 0;
+  for (const d of dateRangeISO(fullHistoryStart, latestActivity)) {
+    running += netAll.get(d) ?? 0;
+    backlogByDate.set(d, running);
+  }
+
+  // Forward-fill onto every real day in the window (a day with no events
+  // keeps the prior day's level), then map onto the (possibly padded)
+  // display range *without* ffill -- padding beyond latestActivity is a
+  // blank future day, not known data.
+  let lastKnown: number | null = null;
+  const backlogFfilled = new Map<string, number>();
+  for (const d of dateRangeISO(windowStart, latestActivity)) {
+    if (backlogByDate.has(d)) lastKnown = backlogByDate.get(d)!;
+    if (lastKnown !== null) backlogFfilled.set(d, lastKnown);
+  }
+
+  return dateRange.map((date) => ({
+    date,
+    produced: producedDaily.get(date) ?? 0,
+    repaired: repairedDaily.get(date) ?? 0,
+    stock: backlogFfilled.get(date) ?? null,
+    net: netAll.get(date) ?? 0,
+  }));
+}

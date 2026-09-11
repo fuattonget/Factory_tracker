@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Plot from "@/components/Plot";
 import type { DailyAmountPoint, DailyRatioPoint, ProductionTypeTrendSeries, ParetoPoint } from "@/lib/dashboard";
+import type { BacklogTrendPoint } from "@/lib/pipeOverview";
 
 const PRIMARY = "#2563eb"; // matches dash_app's --color-primary, single-series charts need no legend/second hue
 const AXIS_TEXT = "#64748b";
@@ -15,6 +16,7 @@ const BORDER_LINE = "#e2e8f0";
 const COLOR_COIL = "#2563eb";
 const COLOR_PLATE = "#7c3aed";
 const COLOR_MIX = "#f97316";
+const COLOR_DANGER = "#dc2626";
 
 const baseFont = { family: "system-ui, sans-serif", color: "#1e293b" };
 
@@ -335,5 +337,92 @@ export function RepairRatioParetoChart({ data }: { data: ParetoPoint[] }) {
       valueLabel="Repair Ratio (%)"
       hoverValueFormat=".2f"
     />
+  );
+}
+
+function formatDDMMYY(iso: string): string {
+  const [y, m, d] = iso.split("-");
+  return `${d}.${m}.${y.slice(2)}`;
+}
+
+// Ports render_dashboard's "Backlog Trend" chart -- grouped Produced/
+// Repaired bars plus a Total Stock line, all on ONE shared y-axis (not a
+// second axis) per dash_app's own explicit choice ("per request" in the
+// Python comment). Categorical x-axis (not a real date axis) -- with very
+// few real days in the window, a continuous date axis infers bogus
+// bar-width/spacing; category ticks sidestep that entirely.
+export function BacklogTrendChart({ data }: { data: BacklogTrendPoint[] }) {
+  const labels = data.map((d) => formatDDMMYY(d.date));
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <h2 className="mb-3 text-sm font-semibold text-slate-700">Backlog Trend</h2>
+      <Plot
+        data={[
+          {
+            type: "bar",
+            name: "Produced",
+            x: labels,
+            y: data.map((d) => d.produced),
+            marker: { color: COLOR_MIX },
+            texttemplate: "%{y}",
+            textposition: "outside",
+            hovertemplate: "%{x}<br>Produced: <b>%{y}</b><extra></extra>",
+          },
+          {
+            type: "bar",
+            name: "Repaired",
+            x: labels,
+            y: data.map((d) => d.repaired),
+            marker: { color: COLOR_COIL },
+            texttemplate: "%{y}",
+            textposition: "outside",
+            hovertemplate: "%{x}<br>Repaired: <b>%{y}</b><extra></extra>",
+          },
+          {
+            type: "scatter",
+            mode: "lines+markers+text",
+            name: "Total Stock / Remaining Pipes",
+            x: labels,
+            y: data.map((d) => d.stock),
+            line: { color: COLOR_DANGER, width: 3 },
+            marker: { size: 8, color: COLOR_DANGER, line: { color: "white", width: 1 } },
+            text: data.map((d) => (d.stock != null ? String(d.stock) : "")),
+            textposition: "top center",
+            textfont: { color: COLOR_DANGER },
+            hovertemplate: "%{x}<br>Total Stock: <b>%{y}</b> pipes<extra></extra>",
+            connectgaps: false,
+          },
+        ]}
+        layout={{
+          barmode: "group",
+          autosize: true,
+          margin: { l: 56, r: 16, t: 8, b: 60 },
+          plot_bgcolor: "white",
+          paper_bgcolor: "white",
+          font: baseFont,
+          hoverlabel: { bgcolor: "white", bordercolor: BORDER_LINE, font: { color: "#1e293b", size: 12 } },
+          showlegend: true,
+          legend: { orientation: "h", y: 1.15, x: 1, xanchor: "right" },
+          xaxis: {
+            type: "category",
+            showgrid: false,
+            tickangle: -45,
+            tickfont: { size: 11, color: AXIS_TEXT },
+            linecolor: BORDER_LINE,
+          },
+          yaxis: {
+            title: { text: "Pipe Count" },
+            rangemode: "tozero",
+            showgrid: true,
+            gridcolor: GRID_LINE,
+            zeroline: false,
+            tickfont: { size: 11, color: AXIS_TEXT },
+          },
+        }}
+        config={config}
+        style={{ width: "100%", height: "380px" }}
+        useResizeHandler
+      />
+    </div>
   );
 }

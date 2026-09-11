@@ -6,6 +6,7 @@ import {
   ProductionTypeTrendChart,
   RepairAmountParetoChart,
   RepairRatioParetoChart,
+  BacklogTrendChart,
 } from "./DashboardCharts";
 import {
   loadMasterData,
@@ -17,7 +18,7 @@ import {
   repairAmountPareto,
   repairRatioPareto,
 } from "@/lib/dashboard";
-import { loadPipeRepairDetails, loadProjectSheetLinks, buildPipeOverview } from "@/lib/pipeOverview";
+import { loadPipeRepairDetails, loadProjectSheetLinks, buildPipeOverview, buildBacklogTrend } from "@/lib/pipeOverview";
 
 function formatDate(iso: string): string {
   const [y, m, d] = iso.split("-");
@@ -47,6 +48,7 @@ export default async function Dashboard() {
   const typeTrend = productionTypeTrendSeries(rows);
   const summary = summarize(rows, ratios);
   const pipeOverview = buildPipeOverview(pipes, links);
+  const backlogTrend = buildBacklogTrend(pipes, links);
   const latestDayRows = getLatestDayRows(rows);
   const amountPareto = repairAmountPareto(latestDayRows);
   const ratioPareto = repairRatioPareto(latestDayRows);
@@ -75,7 +77,8 @@ export default async function Dashboard() {
           <ProductionTypeTrendChart series={typeTrend} />
         </div>
 
-        <div className="mt-5">
+        <div className="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-2">
+          {backlogTrend && <BacklogTrendChart data={backlogTrend} />}
           <DailyRepairAmountChart data={amounts} />
         </div>
 
