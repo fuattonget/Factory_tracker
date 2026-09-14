@@ -4,11 +4,18 @@ import { useState, useMemo } from "react";
 import { DataGrid, renderTextEditor, type Column, type RowsChangeData } from "react-data-grid";
 import "react-data-grid/lib/styles.css";
 import type { Pipe, PipeInput, ProjectStageConfig } from "@/lib/types";
+import type { ProjectPipeGroupProgress } from "@/lib/pipes";
+import { formatDimensions } from "@/lib/pipes";
+import { FeaturesPicker } from "@/components/FeaturesPicker";
 
 // Everything in the grid is a string (text-editor cells) or boolean
 // (checkbox cells) -- converted to a real PipeInput only on save. Keeps
 // every cell freely editable/blank while typing, which a strict numeric
-// type wouldn't allow.
+// type wouldn't allow. features stays a real string[] since it has its
+// own picker editor, not a text editor. repair_ratio(_incl_skelp) are
+// display-only strings, refreshed from the server's response after each
+// save -- see handleSave -- never sent back as input (PipeInput doesn't
+// even have a slot for them, see lib/types.ts).
 interface GridRow {
   rowId: string; // client-only key, stable across edits
   pipe_no: string;
@@ -17,7 +24,9 @@ interface GridRow {
   produced_date: string;
   status: "Produced" | "Repaired";
   repair_amount: string;
+  repair_amount_incl_skelp: string;
   repair_ratio: string;
+  repair_ratio_incl_skelp: string;
   repair_count: string;
   repair_category: string;
   surface_state: string;
@@ -29,6 +38,10 @@ interface GridRow {
   coating_done: boolean;
   coating_date: string;
   shipped_date: string;
+  features: string[];
+  // Set when this row was bulk-added from a predefined project group --
+  // see the "Gruptan ekle" picker below. Null for ad-hoc rows.
+  group_id: number | null;
 }
 
 function pipeToRow(p: Pipe): GridRow {
@@ -40,7 +53,9 @@ function pipeToRow(p: Pipe): GridRow {
     produced_date: p.produced_date,
     status: p.status,
     repair_amount: p.repair_amount?.toString() ?? "",
+    repair_amount_incl_skelp: p.repair_amount_incl_skelp?.toString() ?? "",
     repair_ratio: p.repair_ratio?.toString() ?? "",
+    repair_ratio_incl_skelp: p.repair_ratio_incl_skelp?.toString() ?? "",
     repair_count: p.repair_count?.toString() ?? "",
     repair_category: p.repair_category ?? "",
     surface_state: p.surface_state ?? "",
@@ -52,10 +67,12 @@ function pipeToRow(p: Pipe): GridRow {
     coating_done: p.coating_done,
     coating_date: p.coating_date ?? "",
     shipped_date: p.shipped_date ?? "",
+    features: p.features ?? [],
+    group_id: p.group_id,
   };
 }
 
-function emptyRow(): GridRow {
+function emptyRow(overrides: Partial<GridRow> = {}): GridRow {
   return {
     rowId: `new-${crypto.randomUUID()}`,
     pipe_no: "",
@@ -64,7 +81,9 @@ function emptyRow(): GridRow {
     produced_date: "",
     status: "Produced",
     repair_amount: "",
+    repair_amount_incl_skelp: "",
     repair_ratio: "",
+    repair_ratio_incl_skelp: "",
     repair_count: "",
     repair_category: "",
     surface_state: "",
@@ -76,7 +95,20 @@ function emptyRow(): GridRow {
     coating_done: false,
     coating_date: "",
     shipped_date: "",
+    features: [],
+    group_id: null,
+    ...overrides,
   };
+}
+
+// Yesterday, local time -- the daily entry workflow is "today's report
+// covers yesterday's floor activity" (confirmed directly by the user), so
+// new rows default here rather than to today. Only the date portion is
+// used, so the local/UTC distinction doesn't otherwise matter.
+function yesterdayISO(): string {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);
+  return d.toISOString().slice(0, 10);
 }
 
 const numOrNull = (s: string) => (s.trim() === "" ? null : Number(s));
@@ -93,7 +125,7 @@ function rowToPipeInput(row: GridRow, projectNo: string): PipeInput | null {
     pipe_length_ft: numOrNull(row.pipe_length_ft),
     produced_date: row.produced_date.trim(),
     repair_amount: numOrNull(row.repair_amount),
-    repair_ratio: numOrNull(row.repair_ratio),
+    repair_amount_incl_skelp: numOrNull(row.repair_amount_incl_skelp),
     repair_count: numOrNull(row.repair_count) as number | null,
     repair_category: strOrNull(row.repair_category),
     surface_state: strOrNull(row.surface_state),
@@ -106,6 +138,8 @@ function rowToPipeInput(row: GridRow, projectNo: string): PipeInput | null {
     coating_done: row.coating_done,
     coating_date: strOrNull(row.coating_date),
     shipped_date: strOrNull(row.shipped_date),
+    features: row.features,
+    group_id: row.group_id,
   };
 }
 
@@ -139,14 +173,71 @@ function StatusEditor({ row, onRowChange, onClose }: { row: GridRow; onRowChange
   );
 }
 
+function FeaturesCell({ row }: { row: GridRow }) {
+  return (
+    <div className="flex h-full items-center overflow-hidden text-ellipsis whitespace-nowrap px-2 text-slate-700">
+      {row.features.length > 0 ? row.features.join(", ") : <span className="text-slate-300">—</span>}
+    </div>
+  );
+}
+
+// Rendered as an absolutely-positioned popup since a checkbox list needs
+// more room than one grid cell -- the picker itself (presets + custom-tag
+// input) is shared with the project Groups form, see FeaturesPicker.
+function FeaturesEditor({
+  row,
+  onRowChange,
+  onClose,
+}: {
+  row: GridRow;
+  onRowChange: (r: GridRow) => void;
+  onClose: (commit: boolean) => void;
+}) {
+  return (
+    <div className="absolute left-0 top-0 z-20 w-56 rounded-lg border border-slate-200 bg-white p-3 shadow-lg">
+      <FeaturesPicker features={row.features} onChange={(features) => onRowChange({ ...row, features })} />
+      <button
+        type="button"
+        onClick={() => onClose(true)}
+        className="mt-2 w-full rounded bg-blue-600 py-1 text-sm font-medium text-white hover:bg-blue-700"
+      >
+        Tamam
+      </button>
+    </div>
+  );
+}
+
+// repair_ratio(_incl_skelp) are never typed in -- the admin only enters a
+// repair amount (meters), the ratio is computed server-side from that
+// amount plus the project's diameter/band_width (see computeRepairRatio in
+// lib/pipes.ts). Read-only display cell, percent-formatted.
+function RatioCell({ value }: { value: string }) {
+  const n = Number(value);
+  const display = value.trim() !== "" && Number.isFinite(n) ? `${(n * 100).toFixed(2)}%` : null;
+  return (
+    <div className="flex h-full items-center justify-end px-2 tabular-nums text-slate-500">
+      {display ?? <span className="text-slate-300">—</span>}
+    </div>
+  );
+}
+
+interface SaveResult {
+  ok: boolean;
+  pipe?: Pipe;
+  warnings?: string[];
+  error?: string;
+}
+
 export function PipeGrid({
   projectNo,
   config,
   initialPipes,
+  groups,
 }: {
   projectNo: string;
   config: ProjectStageConfig;
   initialPipes: Pipe[];
+  groups: ProjectPipeGroupProgress[];
 }) {
   const [rows, setRows] = useState<GridRow[]>(() => initialPipes.map(pipeToRow));
   const [saving, setSaving] = useState(false);
@@ -154,6 +245,28 @@ export function PipeGrid({
   const [errorsByRow, setErrorsByRow] = useState<Record<string, string[]>>({});
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<Date | null>(null);
+
+  const defaultDimensions = formatDimensions(config.diameter, config.wall_thickness) ?? "";
+
+  // The daily-entry "Rapor Tarihi" -- stamps produced_date for every new
+  // row added below (single or bulk), defaulting to yesterday since a
+  // report entered today covers yesterday's floor activity (confirmed
+  // directly by the user). Stays editable per row afterward for correction.
+  const [reportDate, setReportDate] = useState(yesterdayISO);
+
+  const [bulkQty, setBulkQty] = useState("5");
+  const [bulkLength, setBulkLength] = useState("");
+  const [selectedGroupId, setSelectedGroupId] = useState<string>("");
+
+  function handleGroupSelect(id: string) {
+    setSelectedGroupId(id);
+    if (id === "") return; // "— Manuel —": leave qty/length as the admin last set them
+    const group = groups.find((g) => String(g.id) === id);
+    if (!group) return;
+    const remaining = Math.max(0, group.planned_qty - group.produced_qty);
+    setBulkQty(String(remaining));
+    setBulkLength(group.pipe_length_ft?.toString() ?? "");
+  }
 
   const columns = useMemo<Column<GridRow>[]>(() => {
     const base: Column<GridRow>[] = [
@@ -168,11 +281,30 @@ export function PipeGrid({
         renderEditCell: (props) => <StatusEditor {...props} />,
       },
       { key: "repair_amount", name: "Repair Amt", renderEditCell: renderTextEditor, width: 100 },
-      { key: "repair_ratio", name: "Repair Ratio", renderEditCell: renderTextEditor, width: 100 },
+      { key: "repair_amount_incl_skelp", name: "Repair Amt (B.E.)", renderEditCell: renderTextEditor, width: 120 },
+      {
+        key: "repair_ratio",
+        name: "Repair Ratio",
+        width: 100,
+        renderCell: ({ row }) => <RatioCell value={row.repair_ratio} />,
+      },
+      {
+        key: "repair_ratio_incl_skelp",
+        name: "Repair Ratio (B.E.)",
+        width: 120,
+        renderCell: ({ row }) => <RatioCell value={row.repair_ratio_incl_skelp} />,
+      },
       { key: "repair_count", name: "Repair Cnt", renderEditCell: renderTextEditor, width: 90 },
       { key: "repair_category", name: "Category", renderEditCell: renderTextEditor, width: 100 },
       { key: "surface_state", name: "Surface", renderEditCell: renderTextEditor, width: 100 },
       { key: "repaired_date", name: "Repaired Date", renderEditCell: renderTextEditor, width: 120 },
+      {
+        key: "features",
+        name: "Features",
+        width: 180,
+        renderCell: ({ row }) => <FeaturesCell row={row} />,
+        renderEditCell: (props) => <FeaturesEditor {...props} />,
+      },
     ];
 
     if (config.requires_additional_part) {
@@ -206,8 +338,43 @@ export function PipeGrid({
     setRows(newRows);
   }
 
+  function nextPipeNo(): number {
+    const nums = rows.map((r) => Number(r.pipe_no)).filter((n) => Number.isFinite(n) && n > 0);
+    return nums.length > 0 ? Math.max(...nums) + 1 : 1;
+  }
+
   function addRow() {
-    setRows((r) => [...r, emptyRow()]);
+    setRows((r) => [
+      ...r,
+      emptyRow({ pipe_no: String(nextPipeNo()), dimensions: defaultDimensions, produced_date: reportDate }),
+    ]);
+  }
+
+  // "5 tane 77 feet boru ekle" -- bulk-add N pipes of the same length in
+  // one go, auto-numbered from the next free pipe number, so a whole work
+  // order's worth of identical-length pipes doesn't need typing one row at
+  // a time. Picking a predefined group (see handleGroupSelect) pre-fills
+  // qty/length from it and stamps every new row with that group's features
+  // + group_id for progress tracking; "— Manuel —" leaves those blank.
+  function addBulkRows() {
+    const qty = Math.trunc(Number(bulkQty));
+    if (!Number.isFinite(qty) || qty <= 0) return;
+    const group = groups.find((g) => String(g.id) === selectedGroupId) ?? null;
+    let nextNo = nextPipeNo();
+    const newRows: GridRow[] = [];
+    for (let i = 0; i < qty; i++) {
+      newRows.push(
+        emptyRow({
+          pipe_no: String(nextNo++),
+          dimensions: defaultDimensions,
+          pipe_length_ft: bulkLength.trim(),
+          produced_date: reportDate,
+          features: group?.features ?? [],
+          group_id: group?.id ?? null,
+        })
+      );
+    }
+    setRows((r) => [...r, ...newRows]);
   }
 
   async function handleSave() {
@@ -224,18 +391,25 @@ export function PipeGrid({
         body: JSON.stringify({ pipes: payload.map((p) => p.input) }),
       });
       if (!res.ok) throw new Error(`Save failed: ${res.status}`);
-      const { results } = await res.json();
+      const { results }: { results: SaveResult[] } = await res.json();
 
       const nextWarnings: Record<string, string[]> = {};
       const nextErrors: Record<string, string[]> = {};
-      results.forEach((r: { ok: boolean; warnings?: string[]; error?: string }, i: number) => {
+      const nextRows = [...rows];
+      results.forEach((r, i) => {
         const rowId = payload[i].rowId;
-        if (r.ok) {
+        if (r.ok && r.pipe) {
           if (r.warnings && r.warnings.length > 0) nextWarnings[rowId] = r.warnings;
+          // Replace the local row with the server's version (real id,
+          // computed repair_ratio(_incl_skelp), derived shipped_bare) so
+          // the computed ratio shows up immediately, without a reload.
+          const idx = nextRows.findIndex((row) => row.rowId === rowId);
+          if (idx !== -1) nextRows[idx] = { ...pipeToRow(r.pipe), rowId };
         } else {
           nextErrors[rowId] = [r.error ?? "Bilinmeyen hata"];
         }
       });
+      setRows(nextRows);
       setWarningsByRow(nextWarnings);
       setErrorsByRow(nextErrors);
       setSavedAt(new Date());
@@ -252,6 +426,15 @@ export function PipeGrid({
   return (
     <div>
       <div className="mb-3 flex flex-wrap items-center gap-3">
+        <label className="flex items-center gap-2 text-sm text-slate-600">
+          Rapor Tarihi
+          <input
+            type="date"
+            value={reportDate}
+            onChange={(e) => setReportDate(e.target.value)}
+            className="rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm text-slate-800 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+          />
+        </label>
         <button
           onClick={addRow}
           className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50"
@@ -271,6 +454,56 @@ export function PipeGrid({
           </span>
         )}
         {saveError && <span className="text-sm text-red-600">{saveError}</span>}
+      </div>
+
+      <div className="mb-3 flex flex-wrap items-end gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+        {groups.length > 0 && (
+          <label className="flex flex-col text-xs text-slate-500">
+            Gruptan ekle
+            <select
+              value={selectedGroupId}
+              onChange={(e) => handleGroupSelect(e.target.value)}
+              className="mt-1 rounded border border-slate-300 px-2 py-1 text-sm outline-none focus:border-blue-500"
+            >
+              <option value="">— Manuel —</option>
+              {groups.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.label ?? `Grup ${g.id}`} ({g.produced_qty}/{g.planned_qty})
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        <label className="flex flex-col text-xs text-slate-500">
+          Kaç boru
+          <input
+            type="number"
+            min={1}
+            value={bulkQty}
+            onChange={(e) => setBulkQty(e.target.value)}
+            className="mt-1 w-20 rounded border border-slate-300 px-2 py-1 text-sm outline-none focus:border-blue-500"
+          />
+        </label>
+        <label className="flex flex-col text-xs text-slate-500">
+          Uzunluk (ft)
+          <input
+            type="number"
+            step="any"
+            value={bulkLength}
+            onChange={(e) => setBulkLength(e.target.value)}
+            placeholder="örn. 77"
+            className="mt-1 w-24 rounded border border-slate-300 px-2 py-1 text-sm outline-none focus:border-blue-500"
+          />
+        </label>
+        <button
+          onClick={addBulkRows}
+          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50"
+        >
+          Toplu ekle
+        </button>
+        <span className="pb-1.5 text-xs text-slate-400">
+          Pipe No otomatik devam eder, Produced Date Rapor Tarihi olarak dolar — grid&apos;de düzenlenebilir.
+        </span>
       </div>
 
       <div

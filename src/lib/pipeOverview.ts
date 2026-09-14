@@ -1,4 +1,5 @@
 import { createServiceRoleClient } from "@/lib/supabase/server";
+import { FEET_PER_METER } from "@/lib/units";
 
 // Ports pages/home.py:_render_pipe_overview_inner's "Newest Produced /
 // Newest Repaired Pipes" tables. Reads dash_app's own pipe_repair_details
@@ -69,7 +70,6 @@ export function pipeSheetLabelMap(
 // repair_rates.total_repair_amount (see calculations.py:
 // apply_meter_based_repair_ratios) -- converted to ft for display, same
 // factor dash_app's amount_in_display_unit uses.
-const FEET_PER_METER = 1 / 0.3048;
 
 // Same fixed floor as dash_app's PIPE_TREND_FLOOR_DATE -- pre-floor pipes
 // come from the old system, where first_seen_date is a proxy rather than a

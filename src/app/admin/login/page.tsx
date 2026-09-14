@@ -1,10 +1,10 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { Suspense, useState, type FormEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { createBrowserSupabaseClient } from "@/lib/supabase/client";
 
-export default function LoginPage() {
+function LoginForm() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -56,5 +56,16 @@ export default function LoginPage() {
         </button>
       </form>
     </main>
+  );
+}
+
+// useSearchParams() requires a Suspense boundary for prerendering (Next.js
+// bails out of static generation otherwise) -- unrelated to the rest of
+// this file's logic, just the required wrapper shape.
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginForm />
+    </Suspense>
   );
 }

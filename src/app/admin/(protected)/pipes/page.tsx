@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { listProjectStageConfigs, listPipes } from "@/lib/pipes";
+import { listProjectStageConfigs, listPipes, listProjectPipeGroupsWithProgress } from "@/lib/pipes";
 import { PipeGrid } from "./PipeGrid";
 
 export default async function PipesPage({
@@ -10,7 +10,9 @@ export default async function PipesPage({
   const { project } = await searchParams;
   const configs = await listProjectStageConfigs();
   const selected = project ?? configs[0]?.project_no ?? null;
-  const pipes = selected ? await listPipes(selected) : [];
+  const [pipes, groups] = selected
+    ? await Promise.all([listPipes(selected), listProjectPipeGroupsWithProgress(selected)])
+    : [[], []];
   const config = configs.find((c) => c.project_no === selected) ?? null;
 
   return (
@@ -57,7 +59,7 @@ export default async function PipesPage({
 
           {config && (
             <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-              <PipeGrid projectNo={config.project_no} config={config} initialPipes={pipes} />
+              <PipeGrid projectNo={config.project_no} config={config} initialPipes={pipes} groups={groups} />
             </div>
           )}
         </>

@@ -295,6 +295,69 @@ without the follow-up conversation flagged in section 8 — write the schema
 migration, but leave clear `-- TODO: confirm with user` markers on the
 genuinely open pieces rather than guessing silently.
 
+### Project-level fields, planned groups, and the repair-ratio formula
+
+Clarified directly by the user in a follow-up session (2026-09-14), after
+reading the real Excel structure together (`dash_app/exam files/*.xlsx`,
+sheet `06-131`, and the `Daily Repair Rate (Old)` summary sheet's
+formulas):
+
+- **Diameter, wall thickness, and "band width" all live at the
+  `project_stage_config` (project) level** — one value each per project,
+  never per-pipe or per-sub-group. Band width (`W`) is the raw coil/skelp
+  strip width a batch of pipe was rolled from, e.g. the `59` in the real
+  formula `=AP7/((36*3.1415/59)*(75/3.281))` — previously just a hardcoded
+  magic number buried inside individual Excel cell formulas (exactly the
+  kind of fragile thing this whole rewrite exists to eliminate, see
+  section 1). If a real project genuinely needs a different
+  diameter/wall-thickness/band-width batch, the convention (matching
+  `dash_app`'s own sheet-name variants like `10-108 (84xx)` vs
+  `10-108 (90xx)` for the same base project number) is to create it as a
+  **separate `project_stage_config` row**, not to model multiple
+  dimensions inside one project.
+- **Repair ratio is SERVER-COMPUTED, never typed in.** The admin only ever
+  enters the day's total repair amount in meters (`pipes.repair_amount`).
+  The ratio is derived with the same formula the real sheets use:
+  `repair_ratio = repair_amount / ((diameter * PI / band_width) *
+  (pipe_length_ft * METERS_PER_FOOT))` — see `computeSpiralLengthM` /
+  `computeRepairRatio` in `src/lib/pipes.ts`. If the project's
+  diameter/band_width (or the pipe's length) is missing, the ratio is left
+  `null` with a non-blocking warning (`computeStageWarnings`) — never a
+  hard validation error, same "warn, don't block" principle as the
+  lifecycle-stage warnings above.
+- **Base vs. incl.-skelp split, ported properly this time.** The real
+  sheets track two repair amounts/ratios — a base one and a "with
+  Skelp-end Welds (B.E.)" variant. `pipes.repair_amount_incl_skelp` +
+  computed `repair_ratio_incl_skelp` mirror this. Critically,
+  `validatePipeInput` now hard-blocks saving an incl.-skelp amount smaller
+  than the base amount — this is the exact original "M35" bug from
+  section 1, now structurally impossible instead of merely fixed once.
+- **Planned "groups" break a project's total pipe count into sub-batches**
+  — e.g. "Grup 1: 10 pipes, 55ft, has Clutch" + "Grup 2: 50 pipes, 50ft, no
+  Clutch" in the *same* project (dimension/band-width stay fixed at the
+  project level per above). This is planning/target data set up once at
+  project-setup time (`project_pipe_groups` table: `label`, `planned_qty`,
+  `pipe_length_ft`, `features`), separate from the actual `pipes` rows
+  produced day by day. The Borular entry grid's "Gruptan ekle" bulk-add
+  reads a project's groups to pre-fill quantity (defaults to the
+  *remaining* planned count, i.e. `planned_qty` minus how many pipes are
+  already tagged with that `group_id`), length, and features in one click.
+  `pipes.group_id` (nullable, `on delete set null`) tags which group a row
+  came from, purely for "8 of 10 from Group 1 produced so far" progress
+  display — never required, never affects validation.
+- **New project-level fields**: `production_type` (`Coil`/`Plate`, matches
+  the categorization the public Dashboard's "Repair Rate Trend by
+  Production Type" chart already uses), `project_status` (`In Progress` /
+  `Completed` / `On Hold`), `customer_name`, and `archived` (soft delete —
+  `project_no` stays immutable, there is no rename path; an archived
+  project is hidden from the daily-entry project picker by default but
+  never hard-deleted, and every pipe under it is untouched).
+- **Daily entry workflow**: the admin's job each day is entering
+  *yesterday's* floor activity from a report. The Borular page has a
+  single "Rapor Tarihi" (Report Date) picker, defaulting to yesterday,
+  that stamps `produced_date` for every new row added in that session
+  (single or bulk) — still editable per row afterward for correction.
+
 ## 6. What the admin data-entry form must prevent
 
 Restating the failure modes from section 1 as concrete requirements:
@@ -340,6 +403,17 @@ Build in this order, highest-value piece first:
      the real Supabase project (login → add project → add pipe row →
      save → confirmed the exact row in the database → cleaned up test
      data).
+   - Also done (2026-09-14): project-level `diameter`/`wall_thickness`/
+     `band_width`/`production_type`/`project_status`/`customer_name`/
+     `archived`, the `project_pipe_groups` planning table + "Gruptan ekle"
+     bulk-add, server-computed `repair_ratio`(`_incl_skelp`) with the real
+     `(diameter*PI/band_width)*length` formula, the base-vs-incl.-skelp
+     hard validation (the original M35 bug, now structurally blocked), a
+     `pipes.features` tag column (presets confirmed against the real
+     Excel, `src/lib/pipeFeatures.ts`), and the "Rapor Tarihi"
+     (default-yesterday) daily-entry date picker. See the new
+     [section 5 subsection](#5-the-pipe-lifecycle-model) for the full
+     reasoning on each.
    - Still to do in this phase: numeric/date cell editors with real
      validation instead of free-text (a "Repair Amt" that must be a
      number, a real date picker instead of typing `YYYY-MM-DD`), a
@@ -350,8 +424,23 @@ Build in this order, highest-value piece first:
    Running alongside `dash_app` for viewing (per section 8, `dash_app`
    freezes at cutover rather than staying live), this phase alone already
    stops new Excel-entry errors from happening once it's the daily driver.
-2. **Public Dashboard port** — the charts/tables from `dash_app`'s
-   `render_dashboard`, reading whatever the entry form now writes.
+2. **Public Dashboard port (mostly done, still reads `dash_app`'s
+   tables).** Summary cards, repair-rate/production-type trend charts,
+   backlog trend, both Pareto charts, and the Newest Produced/Repaired
+   tables are already built (`src/lib/dashboard.ts`, `src/lib/
+   pipeOverview.ts`, `src/app/page.tsx` + `DashboardCharts.tsx`) — ported
+   field-for-field from `dash_app`'s `render_dashboard`. They still read
+   `dash_app`'s own `repair_rates`/`pipe_repair_details` tables directly
+   (per section 8's "single-write, `pipes` only" decision, that's
+   deliberate for now — the new `pipes`/`project_stage_config` tables
+   aren't the live daily-driver data yet). Repointing these at the new
+   schema instead is a real, not-yet-scheduled follow-up once Phase 1's
+   entry form is the actual daily driver — a **project board / tile view**
+   (see section 4's "Excel-like grid" note) reading the new tables is also
+   still open, wanted by the user for both a daily-summary view and
+   per-project pages, styled after the real Excel's colored pipe-tile
+   layout — deliberately deferred behind finishing Phase 1's entry side
+   first.
 3. **Pipe Analysis port** — project trend, the day-colored sequence chart,
    worst-pipes chart, box plots.
 4. **Comparison port** — multi-project view.
@@ -394,6 +483,31 @@ Each phase past #1 is really its own future planning session.
   (`project_stage_config`, `pipes`), independent of every `dash_app` table,
   identity is a real `id` (not an Excel block position). Run once in the
   Supabase SQL Editor, same project `dash_app` uses.
+
+**Resolved (2026-09-14)** — see the section 5 subsection above for the full
+reasoning on each:
+
+- Diameter/wall-thickness/**band width** all live at the project level, not
+  per-group or per-pipe; a project needing different dimensions gets its
+  own separate `project_stage_config` row instead.
+- `repair_ratio`/`repair_ratio_incl_skelp` are **server-computed only**
+  (`computeSpiralLengthM`/`computeRepairRatio` in `src/lib/pipes.ts`) from
+  the admin-entered repair amount(s) plus the project's diameter/band
+  width — never client-entered, never a manual field in the grid.
+- Added the base-vs-incl.-skelp split (`repair_amount_incl_skelp`,
+  `repair_ratio_incl_skelp`) with a hard validation rule (incl.-skelp can
+  never be smaller than the base amount) — directly fixes the original
+  M35 bug from section 1.
+- Added **planned groups** (`project_pipe_groups`): a project's total pipe
+  count is broken into named sub-batches (quantity, length, features) for
+  planning, read by the Borular grid's "Gruptan ekle" bulk-add. Bulk-add
+  defaults the quantity field to the group's *remaining* (not total
+  planned) count.
+- Added project-level `production_type`, `project_status`, `customer_name`,
+  and `archived` (soft delete — `project_no` stays immutable; archiving
+  only hides a project from the daily-entry picker, never deletes data).
+- Added the "Rapor Tarihi" daily-entry date picker (defaults to yesterday,
+  stamps new rows, stays editable per row).
 
 **Still open — do not guess, ask the user directly:**
 
