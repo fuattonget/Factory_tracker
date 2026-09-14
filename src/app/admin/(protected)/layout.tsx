@@ -12,10 +12,10 @@ export default function ProtectedAdminLayout({ children }: { children: React.Rea
             </Link>
             <nav className="flex items-center gap-4 text-sm">
               <Link href="/admin/projects" className="text-slate-600 hover:text-slate-900">
-                Projeler
+                Projects
               </Link>
               <Link href="/admin/pipes" className="text-slate-600 hover:text-slate-900">
-                Borular
+                Pipes
               </Link>
               <Link href="/" className="text-slate-600 hover:text-slate-900">
                 Public Dashboard

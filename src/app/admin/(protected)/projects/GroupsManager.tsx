@@ -5,7 +5,7 @@ import { FeaturesPicker } from "@/components/FeaturesPicker";
 import { saveProjectPipeGroup, removeProjectPipeGroup } from "./actions";
 import type { ProjectPipeGroupProgress } from "@/lib/pipes";
 
-// Planned sub-groups within a project's total pipe count (e.g. "Grup 1:
+// Planned sub-groups within a project's total pipe count (e.g. "Group 1:
 // 10 pipes, 55ft, has Clutch") -- see supabase/schema.sql's
 // project_pipe_groups comment. Called as typed Server Actions directly
 // (see actions.ts) rather than a <form action=...> since features: string[]
@@ -35,7 +35,7 @@ export function GroupsManager({
     setError(null);
     const qty = Math.trunc(Number(plannedQty));
     if (!Number.isFinite(qty) || qty <= 0) {
-      setError("Planlanan adet pozitif bir sayı olmalı.");
+      setError("Planned qty must be a positive number.");
       return;
     }
     startTransition(async () => {
@@ -63,7 +63,7 @@ export function GroupsManager({
   return (
     <div>
       {groups.length === 0 ? (
-        <p className="text-sm text-slate-400">Bu projede henüz grup tanımlanmadı.</p>
+        <p className="text-sm text-slate-400">No groups defined for this project yet.</p>
       ) : (
         <ul className="mb-4 space-y-2">
           {groups.map((g) => (
@@ -72,9 +72,9 @@ export function GroupsManager({
               className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm"
             >
               <div>
-                <span className="font-medium text-slate-800">{g.label ?? `Grup ${g.id}`}</span>
+                <span className="font-medium text-slate-800">{g.label ?? `Group ${g.id}`}</span>
                 <span className="ml-2 text-slate-500">
-                  {g.produced_qty}/{g.planned_qty} üretildi
+                  {g.produced_qty}/{g.planned_qty} produced
                   {g.pipe_length_ft != null ? ` — ${g.pipe_length_ft} ft` : ""}
                   {g.features.length > 0 ? ` — ${g.features.join(", ")}` : ""}
                 </span>
@@ -85,7 +85,7 @@ export function GroupsManager({
                 disabled={isPending}
                 className="text-xs font-medium text-red-600 hover:underline disabled:opacity-50"
               >
-                Sil
+                Delete
               </button>
             </li>
           ))}
@@ -94,20 +94,20 @@ export function GroupsManager({
 
       <div className="rounded-lg border border-slate-200 bg-white p-3">
         <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-          Yeni grup ekle
+          Add new group
         </p>
         <div className="flex flex-wrap items-end gap-2">
           <label className="flex flex-col text-xs text-slate-500">
-            Etiket (ops.)
+            Label (opt.)
             <input
               value={label}
               onChange={(e) => setLabel(e.target.value)}
-              placeholder="Grup 1"
+              placeholder="Group 1"
               className="mt-1 w-32 rounded border border-slate-300 px-2 py-1 text-sm outline-none focus:border-blue-500"
             />
           </label>
           <label className="flex flex-col text-xs text-slate-500">
-            Planlanan adet
+            Planned qty
             <input
               type="number"
               min={1}
@@ -117,7 +117,7 @@ export function GroupsManager({
             />
           </label>
           <label className="flex flex-col text-xs text-slate-500">
-            Uzunluk (ft)
+            Length (ft)
             <input
               type="number"
               step="any"
@@ -132,11 +132,11 @@ export function GroupsManager({
             disabled={isPending}
             className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            Grup ekle
+            Add group
           </button>
         </div>
         <div className="mt-3">
-          <p className="mb-1 text-xs text-slate-500">Özellikler</p>
+          <p className="mb-1 text-xs text-slate-500">Features</p>
           <FeaturesPicker features={features} onChange={setFeatures} />
         </div>
         {error && <p className="mt-2 text-sm text-red-600">{error}</p>}

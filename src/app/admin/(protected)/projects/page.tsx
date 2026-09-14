@@ -8,11 +8,6 @@ const STATUS_BADGE: Record<string, string> = {
   Completed: "bg-emerald-50 text-emerald-700",
   "On Hold": "bg-amber-50 text-amber-700",
 };
-const STATUS_LABEL: Record<string, string> = {
-  "In Progress": "Devam Ediyor",
-  Completed: "Tamamlandı",
-  "On Hold": "Askıda",
-};
 
 // Per-project stage config: which of the optional lifecycle stages
 // (additional part, coating) apply to this project's work order, plus
@@ -36,13 +31,13 @@ export default async function ProjectsPage({
           &larr; Admin
         </Link>
       </p>
-      <h1 className="mt-2 text-2xl font-bold text-slate-900">Projeler</h1>
+      <h1 className="mt-2 text-2xl font-bold text-slate-900">Projects</h1>
 
       <div className="mt-5 overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
         <table className="w-full min-w-[820px] border-collapse text-sm">
           <thead>
             <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
-              {["Proje No", "Boyut", "Bant Gen.", "Üretim Tipi", "Durum", "Müşteri", "Ek Parça", "Coating", ""].map(
+              {["Project No", "Size", "Band Width", "Production Type", "Status", "Customer", "Add'l Part", "Coating", ""].map(
                 (h) => (
                   <th key={h} className="px-4 py-2.5">
                     {h}
@@ -55,7 +50,7 @@ export default async function ProjectsPage({
             {configs.length === 0 && (
               <tr>
                 <td colSpan={9} className="px-4 py-6 text-center text-slate-400">
-                  Henüz proje eklenmedi.
+                  No projects yet.
                 </td>
               </tr>
             )}
@@ -65,7 +60,7 @@ export default async function ProjectsPage({
                   {c.project_no}
                   {c.archived && (
                     <span className="ml-2 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">
-                      Arşivlendi
+                      Archived
                     </span>
                   )}
                 </td>
@@ -80,19 +75,19 @@ export default async function ProjectsPage({
                     <span
                       className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_BADGE[c.project_status] ?? "bg-slate-100 text-slate-600"}`}
                     >
-                      {STATUS_LABEL[c.project_status] ?? c.project_status}
+                      {c.project_status}
                     </span>
                   )}
                 </td>
                 <td className="px-4 py-2.5 text-slate-600">{c.customer_name ?? ""}</td>
-                <td className="px-4 py-2.5 text-slate-600">{c.requires_additional_part ? "Evet" : "Hayır"}</td>
-                <td className="px-4 py-2.5 text-slate-600">{c.requires_coating ? "Evet" : "Hayır"}</td>
+                <td className="px-4 py-2.5 text-slate-600">{c.requires_additional_part ? "Yes" : "No"}</td>
+                <td className="px-4 py-2.5 text-slate-600">{c.requires_coating ? "Yes" : "No"}</td>
                 <td className="px-4 py-2.5 text-right">
                   <form action={archiveProject}>
                     <input type="hidden" name="project_no" value={c.project_no} />
                     <input type="hidden" name="archived" value={c.archived ? "false" : "true"} />
                     <button type="submit" className="text-xs font-medium text-blue-600 hover:underline">
-                      {c.archived ? "Arşivden çıkar" : "Arşivle"}
+                      {c.archived ? "Unarchive" : "Archive"}
                     </button>
                   </form>
                 </td>
@@ -103,10 +98,10 @@ export default async function ProjectsPage({
       </div>
 
       <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-        <h2 className="text-sm font-semibold text-slate-700">Proje ekle / güncelle</h2>
+        <h2 className="text-sm font-semibold text-slate-700">Add / update project</h2>
         <form action={saveProjectStageConfig} className="mt-4 grid max-w-2xl grid-cols-1 gap-3 sm:grid-cols-2">
           <label className="flex flex-col text-xs text-slate-500 sm:col-span-2">
-            Proje No
+            Project No
             <input
               name="project_no"
               required
@@ -114,7 +109,7 @@ export default async function ProjectsPage({
             />
           </label>
           <label className="flex flex-col text-xs text-slate-500">
-            Çap (inch, örn. 36)
+            Diameter (inch, e.g. 36)
             <input
               name="diameter"
               type="number"
@@ -123,7 +118,7 @@ export default async function ProjectsPage({
             />
           </label>
           <label className="flex flex-col text-xs text-slate-500">
-            Kalınlık (inch, örn. 0.625)
+            Wall Thickness (inch, e.g. 0.625)
             <input
               name="wall_thickness"
               type="number"
@@ -132,7 +127,7 @@ export default async function ProjectsPage({
             />
           </label>
           <label className="flex flex-col text-xs text-slate-500">
-            Bant Genişliği (inch, örn. 59)
+            Band Width (inch, e.g. 59)
             <input
               name="band_width"
               type="number"
@@ -141,14 +136,14 @@ export default async function ProjectsPage({
             />
           </label>
           <label className="flex flex-col text-xs text-slate-500">
-            Müşteri
+            Customer
             <input
               name="customer_name"
               className="mt-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-800 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
             />
           </label>
           <label className="flex flex-col text-xs text-slate-500">
-            Üretim Tipi
+            Production Type
             <select
               name="production_type"
               defaultValue=""
@@ -160,27 +155,27 @@ export default async function ProjectsPage({
             </select>
           </label>
           <label className="flex flex-col text-xs text-slate-500">
-            Proje Durumu
+            Project Status
             <select
               name="project_status"
               defaultValue="In Progress"
               className="mt-1 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-800 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
             >
-              <option value="In Progress">Devam Ediyor</option>
-              <option value="Completed">Tamamlandı</option>
-              <option value="On Hold">Askıda</option>
+              <option value="In Progress">In Progress</option>
+              <option value="Completed">Completed</option>
+              <option value="On Hold">On Hold</option>
             </select>
           </label>
           <label className="flex items-center gap-2 text-sm text-slate-600 sm:col-span-2">
             <input type="checkbox" name="requires_additional_part" className="h-4 w-4 rounded border-slate-300 accent-blue-600" />
-            Bu projede ek parça (montaj + kaynak) var
+            This project has an additional part (assembly + weld)
           </label>
           <label className="flex items-center gap-2 text-sm text-slate-600 sm:col-span-2">
             <input type="checkbox" name="requires_coating" className="h-4 w-4 rounded border-slate-300 accent-blue-600" />
-            Bu projede coating (boya) var
+            This project has coating
           </label>
           <label className="flex flex-col text-xs text-slate-500 sm:col-span-2">
-            Not (opsiyonel)
+            Note (optional)
             <input
               name="notes"
               className="mt-1 rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-800 outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
@@ -190,17 +185,17 @@ export default async function ProjectsPage({
             type="submit"
             className="mt-1 w-fit rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 sm:col-span-2"
           >
-            Kaydet
+            Save
           </button>
         </form>
       </div>
 
       {configs.length > 0 && (
         <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <h2 className="text-sm font-semibold text-slate-700">Gruplar</h2>
+          <h2 className="text-sm font-semibold text-slate-700">Groups</h2>
           <p className="mt-1 text-xs text-slate-500">
-            Bir projenin toplam boru adedini alt gruplara bölün (örn. &quot;10 adet, 55ft, Clutch&quot;) — Borular
-            sayfasındaki &quot;Gruptan ekle&quot; bu gruplardan okur.
+            Break a project&apos;s total pipe count into sub-groups (e.g. &quot;10 units, 55ft, Clutch&quot;) — the
+            Pipes page&apos;s Group picker reads from these.
           </p>
           <form method="GET" className="mt-3 flex items-center gap-3">
             <select
@@ -218,7 +213,7 @@ export default async function ProjectsPage({
               type="submit"
               className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50"
             >
-              Git
+              Go
             </button>
           </form>
 

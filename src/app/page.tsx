@@ -37,7 +37,7 @@ export default async function Dashboard() {
       <main className="min-h-screen bg-slate-50 px-4 py-10 sm:px-8">
         <div className="mx-auto max-w-6xl">
           <h1 className="text-2xl font-bold text-slate-900">Factory Tracker</h1>
-          <p className="mt-4 text-slate-500">Henüz veri yok.</p>
+          <p className="mt-4 text-slate-500">No data yet.</p>
         </div>
       </main>
     );
@@ -57,7 +57,7 @@ export default async function Dashboard() {
     <main className="min-h-screen bg-slate-50 px-4 py-10 sm:px-8">
       <div className="mx-auto max-w-6xl">
         <h1 className="text-2xl font-bold text-slate-900">Factory Tracker</h1>
-        <p className="mt-1 text-sm text-slate-500">Genel Bakış / Dashboard</p>
+        <p className="mt-1 text-sm text-slate-500">Overview / Dashboard</p>
 
         <div className="mt-6 flex flex-wrap gap-4">
           <SummaryCard

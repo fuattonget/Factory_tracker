@@ -34,7 +34,7 @@ function LoginForm() {
 
   return (
     <main style={{ padding: "2rem", maxWidth: 360, fontFamily: "system-ui, sans-serif" }}>
-      <h1>Admin Girişi</h1>
+      <h1>Admin Login</h1>
       <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
         <input
           type="email"
@@ -45,14 +45,14 @@ function LoginForm() {
         />
         <input
           type="password"
-          placeholder="Şifre"
+          placeholder="Password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           required
         />
         {error && <p style={{ color: "crimson" }}>{error}</p>}
         <button type="submit" disabled={loading}>
-          {loading ? "Giriş yapılıyor…" : "Giriş yap"}
+          {loading ? "Signing in…" : "Sign in"}
         </button>
       </form>
     </main>

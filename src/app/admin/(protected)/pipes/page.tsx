@@ -17,26 +17,26 @@ export default async function PipesPage({
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-slate-900">Borular</h1>
+      <h1 className="text-2xl font-bold text-slate-900">Pipes</h1>
       <p className="mt-1 text-sm text-slate-500">
-        Excel tarzı tablo — hücreye çift tıklayıp düzenleyin, sağ alttan yeni satır ekleyin.
+        Excel-style table — double-click a cell to edit, use the Group picker below to add new rows.
       </p>
 
       {configs.length === 0 ? (
         <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-8 text-center shadow-sm">
           <p className="text-slate-600">
-            Önce{" "}
+            First{" "}
             <Link href="/admin/projects" className="font-medium text-blue-600 hover:underline">
-              bir proje ekleyin
+              add a project
             </Link>{" "}
-            — borular bir projeye bağlı olmak zorunda.
+            — pipes must belong to a project.
           </p>
         </div>
       ) : (
         <>
           <form method="GET" className="mt-5 flex items-center gap-3">
             <label className="flex items-center gap-2 text-sm text-slate-600">
-              Proje
+              Project
               <select
                 name="project"
                 defaultValue={selected ?? undefined}
@@ -53,7 +53,7 @@ export default async function PipesPage({
               type="submit"
               className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50"
             >
-              Git
+              Go
             </button>
           </form>
 

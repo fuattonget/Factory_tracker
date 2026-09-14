@@ -126,8 +126,8 @@ export interface ProjectPipeGroupProgress extends ProjectPipeGroup {
 
 // "8 of 10 from Group 1 produced so far" -- counts real pipes rows tagged
 // with this group's id, so it can never drift out of sync with a manually
-// maintained counter. Used by the Borular grid's "Gruptan ekle" to prefill
-// the remaining (not total planned) quantity.
+// maintained counter. Used by the Pipes grid's Group picker to prefill the
+// remaining (not total planned) quantity.
 export async function listProjectPipeGroupsWithProgress(
   project_no: string
 ): Promise<ProjectPipeGroupProgress[]> {
@@ -215,7 +215,7 @@ export function computeStageWarnings(
     computeSpiralLengthM(config, pipe.pipe_length_ft) == null
   ) {
     warnings.push(
-      "Repair Ratio hesaplanamadı — projede çap/bant genişliği veya boru uzunluğu eksik."
+      "Repair Ratio could not be computed — the project is missing a diameter, band width, or pipe length."
     );
   }
 
@@ -282,10 +282,10 @@ export function validatePipeInput(input: PipeInput): string[] {
   const errors: string[] = [];
 
   if (!Number.isInteger(input.pipe_no) || input.pipe_no <= 0) {
-    errors.push("Pipe No pozitif bir tam sayı olmalı.");
+    errors.push("Pipe No must be a positive integer.");
   }
   if (!input.produced_date || !isValidDateString(input.produced_date)) {
-    errors.push("Produced Date geçerli bir tarih olmalı (YYYY-MM-DD).");
+    errors.push("Produced Date must be a valid date (YYYY-MM-DD).");
   }
 
   const dateFields: [string, string | null][] = [
@@ -297,24 +297,24 @@ export function validatePipeInput(input: PipeInput): string[] {
   ];
   for (const [label, value] of dateFields) {
     if (value != null && !isValidDateString(value)) {
-      errors.push(`${label} geçerli bir tarih olmalı (YYYY-MM-DD).`);
+      errors.push(`${label} must be a valid date (YYYY-MM-DD).`);
     }
   }
 
   if (input.pipe_length_ft != null && (Number.isNaN(input.pipe_length_ft) || input.pipe_length_ft < 0)) {
-    errors.push("Length (ft) negatif olamaz.");
+    errors.push("Length (ft) cannot be negative.");
   }
   if (input.repair_amount != null && (Number.isNaN(input.repair_amount) || input.repair_amount < 0)) {
-    errors.push("Repair Amt negatif olamaz.");
+    errors.push("Repair Amt cannot be negative.");
   }
   if (
     input.repair_amount_incl_skelp != null &&
     (Number.isNaN(input.repair_amount_incl_skelp) || input.repair_amount_incl_skelp < 0)
   ) {
-    errors.push("Repair Amt (B.E.) negatif olamaz.");
+    errors.push("Repair Amt (B.E.) cannot be negative.");
   }
   if (input.repair_amount_incl_skelp != null && input.repair_amount == null) {
-    errors.push("Repair Amt (B.E.) girildiyse temel Repair Amt de girilmeli.");
+    errors.push("Repair Amt must also be entered if Repair Amt (B.E.) is entered.");
   }
   if (
     input.repair_amount_incl_skelp != null &&
@@ -325,16 +325,16 @@ export function validatePipeInput(input: PipeInput): string[] {
     // "M35" incident): the incl.-skelp amount was once saved smaller than
     // the base amount. Structurally impossible now -- hard block, not a
     // warning.
-    errors.push("Repair Amt (B.E.), temel Repair Amt'tan küçük olamaz.");
+    errors.push("Repair Amt (B.E.) cannot be smaller than the base Repair Amt.");
   }
   if (input.repair_count != null && (!Number.isInteger(input.repair_count) || input.repair_count < 0)) {
-    errors.push("Repair Count negatif olmayan bir tam sayı olmalı.");
+    errors.push("Repair Count must be a non-negative integer.");
   }
   if (
     input.additional_part_qty != null &&
     (!Number.isInteger(input.additional_part_qty) || input.additional_part_qty < 0)
   ) {
-    errors.push("Part Qty negatif olmayan bir tam sayı olmalı.");
+    errors.push("Part Qty must be a non-negative integer.");
   }
 
   return errors;

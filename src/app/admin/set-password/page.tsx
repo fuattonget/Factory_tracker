@@ -19,11 +19,11 @@ export default function SetPasswordPage() {
     setError(null);
 
     if (password.length < 8) {
-      setError("Şifre en az 8 karakter olmalı.");
+      setError("Password must be at least 8 characters.");
       return;
     }
     if (password !== confirm) {
-      setError("Şifreler eşleşmiyor.");
+      setError("Passwords do not match.");
       return;
     }
 
@@ -42,25 +42,25 @@ export default function SetPasswordPage() {
 
   return (
     <main style={{ padding: "2rem", maxWidth: 360, fontFamily: "system-ui, sans-serif" }}>
-      <h1>Şifre Belirle</h1>
+      <h1>Set Password</h1>
       <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}>
         <input
           type="password"
-          placeholder="Yeni şifre"
+          placeholder="New password"
           value={password}
           onChange={(e) => setPassword(e.target.value)}
           required
         />
         <input
           type="password"
-          placeholder="Şifre (tekrar)"
+          placeholder="Confirm password"
           value={confirm}
           onChange={(e) => setConfirm(e.target.value)}
           required
         />
         {error && <p style={{ color: "crimson" }}>{error}</p>}
         <button type="submit" disabled={loading}>
-          {loading ? "Kaydediliyor…" : "Kaydet"}
+          {loading ? "Saving…" : "Save"}
         </button>
       </form>
     </main>

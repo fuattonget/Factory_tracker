@@ -18,7 +18,7 @@ const strOrNull = (v: FormDataEntryValue | null): string | null =>
 export async function saveProjectStageConfig(formData: FormData) {
   const project_no = String(formData.get("project_no") ?? "").trim();
   if (!project_no) {
-    throw new Error("Proje numarası boş olamaz.");
+    throw new Error("Project No cannot be empty.");
   }
 
   // archived is managed exclusively by archiveProject below -- this form
@@ -59,10 +59,10 @@ export async function archiveProject(formData: FormData) {
 // already used for the /admin/api/pipes JSON payload.
 export async function saveProjectPipeGroup(input: ProjectPipeGroupInput & { id?: number }) {
   if (!input.project_no.trim()) {
-    throw new Error("Proje numarası boş olamaz.");
+    throw new Error("Project No cannot be empty.");
   }
   if (!Number.isInteger(input.planned_qty) || input.planned_qty <= 0) {
-    throw new Error("Planlanan adet pozitif bir tam sayı olmalı.");
+    throw new Error("Planned qty must be a positive integer.");
   }
   await upsertProjectPipeGroup(input);
   revalidatePath("/admin/projects");

@@ -39,8 +39,8 @@ interface GridRow {
   coating_date: string;
   shipped_date: string;
   features: string[];
-  // Set when this row was bulk-added from a predefined project group --
-  // see the "Gruptan ekle" picker below. Null for ad-hoc rows.
+  // Set when this row was added from a predefined project group -- see the
+  // "Group" picker below. Null for ad-hoc rows.
   group_id: number | null;
 }
 
@@ -143,19 +143,6 @@ function rowToPipeInput(row: GridRow, projectNo: string): PipeInput | null {
   };
 }
 
-function CheckboxCell({ row, onRowChange }: { row: GridRow; onRowChange: (r: GridRow) => void }) {
-  return (
-    <div className="flex h-full items-center justify-center">
-      <input
-        type="checkbox"
-        checked={row.coating_done}
-        onChange={(e) => onRowChange({ ...row, coating_done: e.target.checked })}
-        className="h-4 w-4 rounded border-slate-300 accent-blue-600"
-      />
-    </div>
-  );
-}
-
 function StatusEditor({ row, onRowChange, onClose }: { row: GridRow; onRowChange: (r: GridRow) => void; onClose: (commit: boolean) => void }) {
   return (
     <select
@@ -201,7 +188,7 @@ function FeaturesEditor({
         onClick={() => onClose(true)}
         className="mt-2 w-full rounded bg-blue-600 py-1 text-sm font-medium text-white hover:bg-blue-700"
       >
-        Tamam
+        Done
       </button>
     </div>
   );
@@ -217,6 +204,76 @@ function RatioCell({ value }: { value: string }) {
   return (
     <div className="flex h-full items-center justify-end px-2 tabular-nums text-slate-500">
       {display ?? <span className="text-slate-300">—</span>}
+    </div>
+  );
+}
+
+// A checkbox that stands in for a date field: checking it stamps `value`
+// with the current Report Date (so the admin never has to type a date for
+// a plain "is this done" fact); unchecking an already-set one asks for
+// confirmation first, since that means undoing a completed step rather
+// than just correcting a typo. The date itself still shows next to the
+// box, in small text, once set.
+function DoneDateCell({
+  value,
+  reportDate,
+  onChange,
+  confirmMessage,
+}: {
+  value: string;
+  reportDate: string;
+  onChange: (next: string) => void;
+  confirmMessage: string;
+}) {
+  const checked = value.trim() !== "";
+  function handleChange(next: boolean) {
+    if (next) {
+      onChange(reportDate);
+    } else if (window.confirm(confirmMessage)) {
+      onChange("");
+    }
+  }
+  return (
+    <div className="flex h-full items-center justify-center gap-1.5">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => handleChange(e.target.checked)}
+        className="h-4 w-4 rounded border-slate-300 accent-blue-600"
+      />
+      {checked && <span className="text-xs text-slate-400">{value}</span>}
+    </div>
+  );
+}
+
+// Same idea as DoneDateCell, but coating has its own boolean column
+// (coating_done) alongside the date, so both fields move together here
+// instead of inferring "done" purely from date presence.
+function CoatingCell({
+  row,
+  reportDate,
+  onRowChange,
+}: {
+  row: GridRow;
+  reportDate: string;
+  onRowChange: (r: GridRow) => void;
+}) {
+  function handleChange(next: boolean) {
+    if (next) {
+      onRowChange({ ...row, coating_done: true, coating_date: reportDate });
+    } else if (window.confirm("Remove the Coating Done mark? This will also clear the coating date.")) {
+      onRowChange({ ...row, coating_done: false, coating_date: "" });
+    }
+  }
+  return (
+    <div className="flex h-full items-center justify-center gap-1.5">
+      <input
+        type="checkbox"
+        checked={row.coating_done}
+        onChange={(e) => handleChange(e.target.checked)}
+        className="h-4 w-4 rounded border-slate-300 accent-blue-600"
+      />
+      {row.coating_done && row.coating_date && <span className="text-xs text-slate-400">{row.coating_date}</span>}
     </div>
   );
 }
@@ -248,24 +305,36 @@ export function PipeGrid({
 
   const defaultDimensions = formatDimensions(config.diameter, config.wall_thickness) ?? "";
 
-  // The daily-entry "Rapor Tarihi" -- stamps produced_date for every new
-  // row added below (single or bulk), defaulting to yesterday since a
-  // report entered today covers yesterday's floor activity (confirmed
-  // directly by the user). Stays editable per row afterward for correction.
+  // The daily-entry Report Date -- stamps produced_date for every new row
+  // added below, and is what DoneDateCell/CoatingCell stamp onto a
+  // completion checkbox, defaulting to yesterday since a report entered
+  // today covers yesterday's floor activity (confirmed directly by the
+  // user). Stays editable per row afterward for correction.
   const [reportDate, setReportDate] = useState(yesterdayISO);
 
-  const [bulkQty, setBulkQty] = useState("5");
-  const [bulkLength, setBulkLength] = useState("");
+  // Pipe numbers arrive in physical production order, but which planned
+  // group each one turns out to be isn't known ahead of time (confirmed
+  // directly by the user -- e.g. pipe 1 = 50ft, pipe 2 = 50ft, pipe 3 =
+  // 55ft, pipe 4 = 50ft again). So adding a row is: pick which group this
+  // next pipe belongs to (or "Manual"), then Add -- one click per pipe in
+  // the common case, or a quantity > 1 when several in a row share the
+  // same group.
+  const [addQty, setAddQty] = useState("1");
+  const [addLength, setAddLength] = useState("");
   const [selectedGroupId, setSelectedGroupId] = useState<string>("");
 
   function handleGroupSelect(id: string) {
     setSelectedGroupId(id);
-    if (id === "") return; // "— Manuel —": leave qty/length as the admin last set them
+    if (id === "") {
+      setAddQty("1");
+      setAddLength("");
+      return;
+    }
     const group = groups.find((g) => String(g.id) === id);
     if (!group) return;
     const remaining = Math.max(0, group.planned_qty - group.produced_qty);
-    setBulkQty(String(remaining));
-    setBulkLength(group.pipe_length_ft?.toString() ?? "");
+    setAddQty(String(remaining));
+    setAddLength(group.pipe_length_ft?.toString() ?? "");
   }
 
   const columns = useMemo<Column<GridRow>[]>(() => {
@@ -311,28 +380,53 @@ export function PipeGrid({
       base.push(
         { key: "additional_part_name", name: "Add'l Part", renderEditCell: renderTextEditor, width: 130 },
         { key: "additional_part_qty", name: "Part Qty", renderEditCell: renderTextEditor, width: 90 },
-        { key: "additional_part_assembled_date", name: "Assembled", renderEditCell: renderTextEditor, width: 120 },
-        { key: "additional_part_welded_date", name: "Welded", renderEditCell: renderTextEditor, width: 120 }
+        {
+          key: "additional_part_assembled_date",
+          name: "Assembled",
+          width: 130,
+          renderCell: ({ row, onRowChange }) => (
+            <DoneDateCell
+              value={row.additional_part_assembled_date}
+              reportDate={reportDate}
+              onChange={(v) => onRowChange({ ...row, additional_part_assembled_date: v })}
+              confirmMessage="Remove the Assembled mark? This will also clear the assembled date."
+            />
+          ),
+          renderEditCell: undefined,
+        },
+        {
+          key: "additional_part_welded_date",
+          name: "Welded",
+          width: 130,
+          renderCell: ({ row, onRowChange }) => (
+            <DoneDateCell
+              value={row.additional_part_welded_date}
+              reportDate={reportDate}
+              onChange={(v) => onRowChange({ ...row, additional_part_welded_date: v })}
+              confirmMessage="Remove the Welded mark? This will also clear the welded date."
+            />
+          ),
+          renderEditCell: undefined,
+        }
       );
     }
 
     if (config.requires_coating) {
-      base.push(
-        {
-          key: "coating_done",
-          name: "Coating Done",
-          width: 100,
-          renderCell: ({ row, onRowChange }) => <CheckboxCell row={row} onRowChange={onRowChange} />,
-          renderEditCell: undefined,
-        },
-        { key: "coating_date", name: "Coating Date", renderEditCell: renderTextEditor, width: 120 }
-      );
+      base.push({
+        key: "coating_done",
+        name: "Coating",
+        width: 130,
+        renderCell: ({ row, onRowChange }) => (
+          <CoatingCell row={row} reportDate={reportDate} onRowChange={onRowChange} />
+        ),
+        renderEditCell: undefined,
+      });
     }
 
     base.push({ key: "shipped_date", name: "Shipped Date", renderEditCell: renderTextEditor, width: 120 });
 
     return base;
-  }, [config.requires_additional_part, config.requires_coating]);
+  }, [config.requires_additional_part, config.requires_coating, reportDate]);
 
   function handleRowsChange(newRows: GridRow[], _data: RowsChangeData<GridRow>) {
     setRows(newRows);
@@ -343,21 +437,13 @@ export function PipeGrid({
     return nums.length > 0 ? Math.max(...nums) + 1 : 1;
   }
 
-  function addRow() {
-    setRows((r) => [
-      ...r,
-      emptyRow({ pipe_no: String(nextPipeNo()), dimensions: defaultDimensions, produced_date: reportDate }),
-    ]);
-  }
-
-  // "5 tane 77 feet boru ekle" -- bulk-add N pipes of the same length in
-  // one go, auto-numbered from the next free pipe number, so a whole work
-  // order's worth of identical-length pipes doesn't need typing one row at
-  // a time. Picking a predefined group (see handleGroupSelect) pre-fills
-  // qty/length from it and stamps every new row with that group's features
-  // + group_id for progress tracking; "— Manuel —" leaves those blank.
-  function addBulkRows() {
-    const qty = Math.trunc(Number(bulkQty));
+  // The main way pipes get entered: pick which group this next pipe (or
+  // run of pipes) belongs to -- or leave it on "Manual" -- then Add.
+  // Auto-numbers from the next free pipe number and stamps produced_date
+  // from the Report Date, so the common case (one pipe at a time, as each
+  // is physically produced) is a single click once the group is picked.
+  function addRows() {
+    const qty = Math.trunc(Number(addQty));
     if (!Number.isFinite(qty) || qty <= 0) return;
     const group = groups.find((g) => String(g.id) === selectedGroupId) ?? null;
     let nextNo = nextPipeNo();
@@ -367,7 +453,7 @@ export function PipeGrid({
         emptyRow({
           pipe_no: String(nextNo++),
           dimensions: defaultDimensions,
-          pipe_length_ft: bulkLength.trim(),
+          pipe_length_ft: addLength.trim(),
           produced_date: reportDate,
           features: group?.features ?? [],
           group_id: group?.id ?? null,
@@ -406,7 +492,7 @@ export function PipeGrid({
           const idx = nextRows.findIndex((row) => row.rowId === rowId);
           if (idx !== -1) nextRows[idx] = { ...pipeToRow(r.pipe), rowId };
         } else {
-          nextErrors[rowId] = [r.error ?? "Bilinmeyen hata"];
+          nextErrors[rowId] = [r.error ?? "Unknown error"];
         }
       });
       setRows(nextRows);
@@ -427,7 +513,7 @@ export function PipeGrid({
     <div>
       <div className="mb-3 flex flex-wrap items-center gap-3">
         <label className="flex items-center gap-2 text-sm text-slate-600">
-          Rapor Tarihi
+          Report Date
           <input
             type="date"
             value={reportDate}
@@ -436,21 +522,15 @@ export function PipeGrid({
           />
         </label>
         <button
-          onClick={addRow}
-          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50"
-        >
-          + Yeni satır
-        </button>
-        <button
           onClick={handleSave}
           disabled={saving}
           className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
         >
-          {saving ? "Kaydediliyor…" : "Kaydet"}
+          {saving ? "Saving…" : "Save"}
         </button>
         {savedAt && (
           <span className="flex items-center gap-1 text-sm text-emerald-600">
-            Kaydedildi ({savedAt.toLocaleTimeString()})
+            Saved ({savedAt.toLocaleTimeString()})
           </span>
         )}
         {saveError && <span className="text-sm text-red-600">{saveError}</span>}
@@ -459,50 +539,50 @@ export function PipeGrid({
       <div className="mb-3 flex flex-wrap items-end gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
         {groups.length > 0 && (
           <label className="flex flex-col text-xs text-slate-500">
-            Gruptan ekle
+            Group
             <select
               value={selectedGroupId}
               onChange={(e) => handleGroupSelect(e.target.value)}
               className="mt-1 rounded border border-slate-300 px-2 py-1 text-sm outline-none focus:border-blue-500"
             >
-              <option value="">— Manuel —</option>
+              <option value="">— Manual —</option>
               {groups.map((g) => (
                 <option key={g.id} value={g.id}>
-                  {g.label ?? `Grup ${g.id}`} ({g.produced_qty}/{g.planned_qty})
+                  {g.label ?? `Group ${g.id}`} ({g.produced_qty}/{g.planned_qty})
                 </option>
               ))}
             </select>
           </label>
         )}
         <label className="flex flex-col text-xs text-slate-500">
-          Kaç boru
+          Quantity
           <input
             type="number"
             min={1}
-            value={bulkQty}
-            onChange={(e) => setBulkQty(e.target.value)}
+            value={addQty}
+            onChange={(e) => setAddQty(e.target.value)}
             className="mt-1 w-20 rounded border border-slate-300 px-2 py-1 text-sm outline-none focus:border-blue-500"
           />
         </label>
         <label className="flex flex-col text-xs text-slate-500">
-          Uzunluk (ft)
+          Length (ft)
           <input
             type="number"
             step="any"
-            value={bulkLength}
-            onChange={(e) => setBulkLength(e.target.value)}
-            placeholder="örn. 77"
+            value={addLength}
+            onChange={(e) => setAddLength(e.target.value)}
+            placeholder="e.g. 77"
             className="mt-1 w-24 rounded border border-slate-300 px-2 py-1 text-sm outline-none focus:border-blue-500"
           />
         </label>
         <button
-          onClick={addBulkRows}
-          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 shadow-sm transition-colors hover:bg-slate-50"
+          onClick={addRows}
+          className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700"
         >
-          Toplu ekle
+          + Add
         </button>
         <span className="pb-1.5 text-xs text-slate-400">
-          Pipe No otomatik devam eder, Produced Date Rapor Tarihi olarak dolar — grid&apos;de düzenlenebilir.
+          Pipe No continues automatically; Produced Date fills in from the Report Date — editable in the grid.
         </span>
       </div>
 
@@ -531,7 +611,7 @@ export function PipeGrid({
       {allErrors.length > 0 && (
         <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4">
           <p className="text-sm font-semibold text-red-700">
-            Kaydedilmedi — bu satırlar veritabanına yazılmadı, değeri düzeltip tekrar kaydedin
+            Not saved — these rows were not written to the database, fix the value and save again
           </p>
           <ul className="mt-2 space-y-1 text-sm text-red-700">
             {allErrors.map(([rowId, errors]) => {
@@ -548,7 +628,7 @@ export function PipeGrid({
 
       {allWarnings.length > 0 && (
         <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
-          <p className="text-sm font-semibold text-amber-700">Uyarılar — kaydedildi, sadece bilgi amaçlı</p>
+          <p className="text-sm font-semibold text-amber-700">Warnings — saved, informational only</p>
           <ul className="mt-2 space-y-1 text-sm text-amber-700">
             {allWarnings.map(([rowId, warnings]) => {
               const row = rows.find((r) => r.rowId === rowId);

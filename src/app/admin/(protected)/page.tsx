@@ -20,8 +20,8 @@ export default async function AdminHome() {
         className="mt-6 flex items-center justify-between rounded-2xl bg-blue-600 p-5 text-white shadow-sm transition-colors hover:bg-blue-700"
       >
         <div>
-          <p className="text-lg font-semibold">Veri Girişi Yap</p>
-          <p className="mt-0.5 text-sm text-blue-100">Günlük rapordaki boruları işle</p>
+          <p className="text-lg font-semibold">Enter Data</p>
+          <p className="mt-0.5 text-sm text-blue-100">Process today&apos;s report</p>
         </div>
         <span aria-hidden className="text-2xl">
           &rarr;
@@ -33,14 +33,14 @@ export default async function AdminHome() {
           href="/admin/projects"
           className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md"
         >
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Projeler</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Projects</p>
           <p className="mt-2 text-3xl font-bold tabular-nums text-slate-900">{stageConfigs.length}</p>
         </Link>
         <Link
           href="/admin/pipes"
           className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md"
         >
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Borular</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Pipes</p>
           <p className="mt-2 text-3xl font-bold tabular-nums text-slate-900">{pipes.length}</p>
         </Link>
       </div>

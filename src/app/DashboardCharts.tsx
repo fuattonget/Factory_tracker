@@ -212,7 +212,7 @@ export function ProductionTypeTrendChart({ series }: { series: ProductionTypeTre
 
       {traces.length === 0 ? (
         <p className="py-16 text-center text-sm text-slate-400">
-          En az bir üretim tipi seçin.
+          Select at least one production type.
         </p>
       ) : (
         <Plot
