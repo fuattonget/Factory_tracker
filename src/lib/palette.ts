@@ -46,3 +46,22 @@ export const STATUS = {
   serious: "#ec835a",
   critical: "#d03b3b",
 } as const;
+
+function relativeLuminance(hex: string): number {
+  const c = hex.replace("#", "");
+  const r = parseInt(c.slice(0, 2), 16) / 255;
+  const g = parseInt(c.slice(2, 4), 16) / 255;
+  const b = parseInt(c.slice(4, 6), 16) / 255;
+  const lin = (v: number) => (v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4));
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+}
+
+// Picks whichever of black/white ink wins the WCAG contrast race against a
+// given fill -- computed per color instead of hand-picked, since tile bands
+// pair every categorical AND status hue (8 + 4 fixed values, all fair game)
+// with a solid label. White-on-everything (the board's original approach)
+// silently fails contrast on the lighter half of the palette (e.g. white on
+// STATUS.warning is ~1.8:1) -- this is what actually fixes that.
+export function contrastTextColor(hex: string): "#0f172a" | "#ffffff" {
+  return relativeLuminance(hex) > 0.179 ? "#0f172a" : "#ffffff";
+}

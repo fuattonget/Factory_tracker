@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { SummaryCard } from "@/components/SummaryCard";
 import { NewestPipesTable } from "@/components/NewestPipesTable";
+import { BacklogDetailTable } from "@/components/BacklogDetailTable";
 import {
   RepairRateTrendChart,
   DailyRepairAmountChart,
@@ -8,16 +9,23 @@ import {
   RepairAmountParetoChart,
   RepairRatioParetoChart,
   BacklogTrendChart,
+  WorstProjectsChart,
+  SkelpImpactRatioChart,
+  SkelpImpactAmountChart,
 } from "./DashboardCharts";
 import {
   loadMasterData,
   dailyWeightedRepairRatios,
+  dailyWeightedRepairRatiosInclSkelp,
   repairAmountTrendData,
   productionTypeTrendSeries,
   summarize,
   getLatestDayRows,
   repairAmountPareto,
   repairRatioPareto,
+  worstProjectsByRatio,
+  skelpImpactByRatio,
+  skelpImpactByAmount,
 } from "@/lib/dashboard";
 import { loadPipeRepairDetails, loadProjectSheetLinks, buildPipeOverview, buildBacklogTrend } from "@/lib/pipeOverview";
 
@@ -50,6 +58,7 @@ export default async function Dashboard() {
   }
 
   const ratios = dailyWeightedRepairRatios(rows);
+  const ratiosInclSkelp = dailyWeightedRepairRatiosInclSkelp(rows);
   const amounts = repairAmountTrendData(rows);
   const typeTrend = productionTypeTrendSeries(rows);
   const summary = summarize(rows, ratios);
@@ -58,6 +67,9 @@ export default async function Dashboard() {
   const latestDayRows = getLatestDayRows(rows);
   const amountPareto = repairAmountPareto(latestDayRows);
   const ratioPareto = repairRatioPareto(latestDayRows);
+  const worstProjects = worstProjectsByRatio(latestDayRows);
+  const skelpRatio = skelpImpactByRatio(latestDayRows);
+  const skelpAmount = skelpImpactByAmount(latestDayRows);
 
   return (
     <main className="min-h-screen bg-slate-50 px-4 py-10 sm:px-8">
@@ -86,18 +98,35 @@ export default async function Dashboard() {
         </div>
 
         <div className="mt-6 grid grid-cols-1 gap-5 lg:grid-cols-2">
-          <RepairRateTrendChart data={ratios} />
+          <RepairRateTrendChart dataExcl={ratios} dataIncl={ratiosInclSkelp} />
           <ProductionTypeTrendChart series={typeTrend} />
         </div>
 
-        <div className="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-2">
-          {backlogTrend && <BacklogTrendChart data={backlogTrend} />}
-          <DailyRepairAmountChart data={amounts} />
+        <div className="mt-5">
+          <WorstProjectsChart data={worstProjects} />
         </div>
 
         <div className="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-2">
-          <RepairAmountParetoChart data={amountPareto} />
+          <SkelpImpactRatioChart data={skelpRatio} />
+          <SkelpImpactAmountChart data={skelpAmount} />
+        </div>
+
+        <div className="mt-5">
           <RepairRatioParetoChart data={ratioPareto} />
+        </div>
+        <div className="mt-5">
+          <RepairAmountParetoChart data={amountPareto} />
+        </div>
+
+        {backlogTrend && (
+          <div className="mt-5">
+            <BacklogTrendChart data={backlogTrend} />
+          </div>
+        )}
+
+        <div className="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-2">
+          <DailyRepairAmountChart data={amounts} />
+          {backlogTrend && <BacklogDetailTable data={backlogTrend} />}
         </div>
 
         {(pipeOverview.newestProduced || pipeOverview.newestRepaired) && (

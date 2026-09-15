@@ -492,23 +492,58 @@ Build in this order, highest-value piece first:
    Running alongside `dash_app` for viewing (per section 8, `dash_app`
    freezes at cutover rather than staying live), this phase alone already
    stops new Excel-entry errors from happening once it's the daily driver.
-2. **Public Dashboard port (mostly done, still reads `dash_app`'s
-   tables).** Summary cards, repair-rate/production-type trend charts,
-   backlog trend, both Pareto charts, and the Newest Produced/Repaired
-   tables are already built (`src/lib/dashboard.ts`, `src/lib/
-   pipeOverview.ts`, `src/app/page.tsx` + `DashboardCharts.tsx`) — ported
-   field-for-field from `dash_app`'s `render_dashboard`. They still read
+2. **Public Dashboard port (feature-complete vs. `dash_app`'s current
+   dashboard; still reads `dash_app`'s tables).** Summary cards,
+   repair-rate/production-type trend charts (now with an Excl./Incl.
+   Skelp toggle, matching `dash_app`'s current behavior), the Top 10
+   Worst Projects by Repair Ratio chart, both Skelp-End Weld Impact
+   charts, both Pareto charts (reordered — Ratio before Amount, matching
+   `dash_app`), Backlog Trend (now its own full-width chart plus a
+   Backlog Trend — Daily Detail table next to Daily Repair Amount), and
+   the Newest Produced/Repaired tables are all built (`src/lib/
+   dashboard.ts`, `src/lib/pipeOverview.ts`, `src/app/page.tsx` +
+   `DashboardCharts.tsx`, `src/components/BacklogDetailTable.tsx`) —
+   ported field-for-field, formulas and chart order included, from
+   `dash_app/pages/home.py`'s `_render_dashboard_inner`. They still read
    `dash_app`'s own `repair_rates`/`pipe_repair_details` tables directly
    (per section 8's "single-write, `pipes` only" decision, that's
    deliberate for now — the new `pipes`/`project_stage_config` tables
    aren't the live daily-driver data yet). Repointing these at the new
    schema instead is a real, not-yet-scheduled follow-up once Phase 1's
-   entry form is the actual daily driver — a **project board / tile view**
-   (see section 4's "Excel-like grid" note) reading the new tables is also
-   still open, wanted by the user for both a daily-summary view and
-   per-project pages, styled after the real Excel's colored pipe-tile
-   layout — deliberately deferred behind finishing Phase 1's entry side
-   first.
+   entry form is the actual daily driver. Explicitly out of scope for
+   now (revisit only if asked): the bubble/quality-matrix chart, the
+   linear trend-line overlay, the full "Latest Day — Project Details"
+   table, and any Charts/Tables tab restructuring.
+   - **Project Board (done, 2026-09-15):** a public, no-auth `/board`
+     route (`src/app/board/page.tsx`) reading the *new* `pipes`/
+     `project_stage_config`/`project_pipe_groups` tables directly, styled
+     after the real Excel's colored pipe-tile layout (confirmed directly
+     against real screenshots) — `src/lib/board.ts` builds the view-model,
+     `src/components/PipeTileCard.tsx` renders one tile with three
+     independent color channels (categorical group identity, per-feature
+     assembly-progress status, and repair-progress status), and
+     `src/lib/palette.ts` holds the dataviz skill's validated 8-hue
+     categorical palette + reserved status colors instead of anything
+     eyeballed. A `track_parts_separately` per-project toggle switches
+     between one shared Assembled/Welded pair and independently-tracked
+     per-feature progress (`pipe_part_progress`). A "DEMO-BOARD" project
+     (real, explicitly-labeled test data, 40 mixed pipes across 6 groups)
+     is seeded in the live Supabase project so the board can be evaluated
+     with realistic data.
+   - **Readability/professional-polish pass (done, 2026-09-15):** the
+     tile board's feature band now stacks one feature per row (was a
+     side-by-side flex that truncated long names like "Back-Up Ring" to
+     "Back-U…"); every tile label's text color is now computed per
+     background via `palette.ts`'s `contrastTextColor` (WCAG luminance
+     crossover, picks black or white ink) instead of hardcoded white,
+     which was silently failing contrast on the lighter half of the
+     palette (e.g. white-on-`STATUS.warning` was ~1.8:1); the tile grid
+     uses `auto-fill`/`minmax(118px,1fr)` instead of fixed column-count
+     breakpoints, so tiles keep a legible minimum width at any viewport;
+     and `/admin/login` was rewritten from unstyled inline-style HTML to
+     match the rest of the app's rounded-card/slate/blue-600 design
+     language. Verified with real Playwright screenshots of `/board`,
+     `/`, and `/admin/login` against the live dev server.
 3. **Pipe Analysis port** — project trend, the day-colored sequence chart,
    worst-pipes chart, box plots.
 4. **Comparison port** — multi-project view.

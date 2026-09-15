@@ -70,7 +70,7 @@ export default async function BoardPage() {
                   )}
                 </div>
 
-                <div className="mt-4 grid grid-cols-4 gap-2 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10">
+                <div className="mt-4 grid grid-cols-[repeat(auto-fill,minmax(118px,1fr))] gap-2.5">
                   {board.tiles.map((tile, i) => (
                     <PipeTileCard key={tile.kind === "pipe" ? `pipe-${tile.pipe_no}` : `planned-${i}`} tile={tile} />
                   ))}
