@@ -1,21 +1,23 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
+import Link from "next/link";
 import { DataGrid, renderTextEditor, type Column, type RowsChangeData } from "react-data-grid";
 import "react-data-grid/lib/styles.css";
 import type { Pipe, PipeInput, ProjectStageConfig } from "@/lib/types";
 import type { ProjectPipeGroupProgress } from "@/lib/pipes";
-import { formatDimensions } from "@/lib/pipes";
+import { formatDimensions, computeSpiralLengthM, computeRepairRatio } from "@/lib/pipes";
 import { FeaturesPicker } from "@/components/FeaturesPicker";
+import { SummaryCard } from "@/components/SummaryCard";
 
 // Everything in the grid is a string (text-editor cells) or boolean
 // (checkbox cells) -- converted to a real PipeInput only on save. Keeps
 // every cell freely editable/blank while typing, which a strict numeric
 // type wouldn't allow. features stays a real string[] since it has its
-// own picker editor, not a text editor. repair_ratio(_incl_skelp) are
-// display-only strings, refreshed from the server's response after each
-// save -- see handleSave -- never sent back as input (PipeInput doesn't
-// even have a slot for them, see lib/types.ts).
+// own picker editor, not a text editor. repair_ratio(_incl_skelp) and
+// repair_amount_incl_skelp are display-only strings, refreshed from the
+// server's response after each save -- see handleSave -- never sent back
+// as input (PipeInput doesn't even have a slot for them, see lib/types.ts).
 interface GridRow {
   rowId: string; // client-only key, stable across edits
   pipe_no: string;
@@ -24,15 +26,12 @@ interface GridRow {
   produced_date: string;
   status: "Produced" | "Repaired";
   repair_amount: string;
+  skelp_weld_count: string;
   repair_amount_incl_skelp: string;
   repair_ratio: string;
   repair_ratio_incl_skelp: string;
   repair_count: string;
-  repair_category: string;
-  surface_state: string;
   repaired_date: string;
-  additional_part_name: string;
-  additional_part_qty: string;
   additional_part_assembled_date: string;
   additional_part_welded_date: string;
   coating_done: boolean;
@@ -53,15 +52,12 @@ function pipeToRow(p: Pipe): GridRow {
     produced_date: p.produced_date,
     status: p.status,
     repair_amount: p.repair_amount?.toString() ?? "",
+    skelp_weld_count: p.skelp_weld_count?.toString() ?? "",
     repair_amount_incl_skelp: p.repair_amount_incl_skelp?.toString() ?? "",
     repair_ratio: p.repair_ratio?.toString() ?? "",
     repair_ratio_incl_skelp: p.repair_ratio_incl_skelp?.toString() ?? "",
     repair_count: p.repair_count?.toString() ?? "",
-    repair_category: p.repair_category ?? "",
-    surface_state: p.surface_state ?? "",
     repaired_date: p.repaired_date ?? "",
-    additional_part_name: p.additional_part_name ?? "",
-    additional_part_qty: p.additional_part_qty?.toString() ?? "",
     additional_part_assembled_date: p.additional_part_assembled_date ?? "",
     additional_part_welded_date: p.additional_part_welded_date ?? "",
     coating_done: p.coating_done,
@@ -81,15 +77,12 @@ function emptyRow(overrides: Partial<GridRow> = {}): GridRow {
     produced_date: "",
     status: "Produced",
     repair_amount: "",
+    skelp_weld_count: "",
     repair_amount_incl_skelp: "",
     repair_ratio: "",
     repair_ratio_incl_skelp: "",
     repair_count: "",
-    repair_category: "",
-    surface_state: "",
     repaired_date: "",
-    additional_part_name: "",
-    additional_part_qty: "",
     additional_part_assembled_date: "",
     additional_part_welded_date: "",
     coating_done: false,
@@ -125,14 +118,10 @@ function rowToPipeInput(row: GridRow, projectNo: string): PipeInput | null {
     pipe_length_ft: numOrNull(row.pipe_length_ft),
     produced_date: row.produced_date.trim(),
     repair_amount: numOrNull(row.repair_amount),
-    repair_amount_incl_skelp: numOrNull(row.repair_amount_incl_skelp),
+    skelp_weld_count: numOrNull(row.skelp_weld_count) as number | null,
     repair_count: numOrNull(row.repair_count) as number | null,
-    repair_category: strOrNull(row.repair_category),
-    surface_state: strOrNull(row.surface_state),
     repaired_date: strOrNull(row.repaired_date),
     status: row.status,
-    additional_part_name: strOrNull(row.additional_part_name),
-    additional_part_qty: numOrNull(row.additional_part_qty) as number | null,
     additional_part_assembled_date: strOrNull(row.additional_part_assembled_date),
     additional_part_welded_date: strOrNull(row.additional_part_welded_date),
     coating_done: row.coating_done,
@@ -141,6 +130,30 @@ function rowToPipeInput(row: GridRow, projectNo: string): PipeInput | null {
     features: row.features,
     group_id: row.group_id,
   };
+}
+
+// Which stage-queue a pipe currently belongs to -- purely a function of
+// what's filled in already, so a pipe always shows in exactly one section
+// (confirmed directly by the user: pipes should visibly move from queue to
+// queue as work on them completes, not sit scattered across one wide
+// table). "done" means everything applicable is complete -- it only shows
+// up in the All Pipes table below, not in any queue.
+type Stage = "repair" | "additional_part" | "coating" | "ship" | "done";
+
+function stageOf(
+  row: GridRow,
+  config: Pick<ProjectStageConfig, "requires_additional_part" | "requires_coating">
+): Stage {
+  if (row.repair_amount.trim() === "") return "repair";
+  if (
+    config.requires_additional_part &&
+    !(row.additional_part_assembled_date.trim() !== "" && row.additional_part_welded_date.trim() !== "")
+  ) {
+    return "additional_part";
+  }
+  if (config.requires_coating && !row.coating_done) return "coating";
+  if (row.shipped_date.trim() === "") return "ship";
+  return "done";
 }
 
 function StatusEditor({ row, onRowChange, onClose }: { row: GridRow; onRowChange: (r: GridRow) => void; onClose: (commit: boolean) => void }) {
@@ -194,13 +207,24 @@ function FeaturesEditor({
   );
 }
 
-// repair_ratio(_incl_skelp) are never typed in -- the admin only enters a
-// repair amount (meters), the ratio is computed server-side from that
-// amount plus the project's diameter/band_width (see computeRepairRatio in
-// lib/pipes.ts). Read-only display cell, percent-formatted.
+// repair_ratio(_incl_skelp) and repair_amount_incl_skelp are never typed
+// in -- the admin only enters a repair amount (meters) and a skelp-weld
+// count, everything here is computed server-side from those plus the
+// project's diameter/band_width (see computeRepairRatio /
+// computeRepairAmountInclSkelp in lib/pipes.ts). Read-only display cells.
 function RatioCell({ value }: { value: string }) {
   const n = Number(value);
   const display = value.trim() !== "" && Number.isFinite(n) ? `${(n * 100).toFixed(2)}%` : null;
+  return (
+    <div className="flex h-full items-center justify-end px-2 tabular-nums text-slate-500">
+      {display ?? <span className="text-slate-300">—</span>}
+    </div>
+  );
+}
+
+function AmountCell({ value }: { value: string }) {
+  const n = Number(value);
+  const display = value.trim() !== "" && Number.isFinite(n) ? n.toFixed(2) : null;
   return (
     <div className="flex h-full items-center justify-end px-2 tabular-nums text-slate-500">
       {display ?? <span className="text-slate-300">—</span>}
@@ -285,6 +309,67 @@ interface SaveResult {
   error?: string;
 }
 
+// One stage-queue table: a narrow slice of columns, a filtered slice of
+// rows, and a summary line below it -- deliberately much smaller than the
+// old one-giant-table-with-every-column view, since finding a specific
+// pipe in a wall of columns was the whole complaint (confirmed directly by
+// the user).
+function StageSection({
+  title,
+  summary,
+  rows,
+  columns,
+  onRowsChange,
+  onSave,
+  saving,
+}: {
+  title: string;
+  summary: string;
+  rows: GridRow[];
+  columns: Column<GridRow>[];
+  onRowsChange: (rows: GridRow[]) => void;
+  onSave: () => void;
+  saving: boolean;
+}) {
+  if (rows.length === 0) return null;
+  return (
+    <div className="mb-5">
+      <h3 className="mb-2 text-sm font-semibold text-slate-700">{title}</h3>
+      <div
+        className="rdg-light overflow-hidden rounded-xl border border-slate-200"
+        style={
+          {
+            "--rdg-border-color": "#e2e8f0",
+            "--rdg-header-background-color": "#f8fafc",
+            "--rdg-row-hover-background-color": "#eff6ff",
+            "--rdg-selection-color": "#2563eb",
+            "--rdg-color": "#1e293b",
+            "--rdg-font-size": "13px",
+          } as React.CSSProperties
+        }
+      >
+        <DataGrid
+          columns={columns}
+          rows={rows}
+          onRowsChange={onRowsChange}
+          rowKeyGetter={(row: GridRow) => row.rowId}
+          style={{ blockSize: Math.min(320, 40 + rows.length * 36), border: "none" }}
+        />
+      </div>
+      <div className="mt-1.5 flex items-center justify-between">
+        <p className="text-xs text-slate-500">{summary}</p>
+        <button
+          onClick={onSave}
+          disabled={saving}
+          className="rounded-lg bg-blue-600 px-3 py-1 text-xs font-medium text-white shadow-sm transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {saving ? "Saving…" : "Save"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export function PipeGrid({
   projectNo,
   config,
@@ -297,11 +382,53 @@ export function PipeGrid({
   groups: ProjectPipeGroupProgress[];
 }) {
   const [rows, setRows] = useState<GridRow[]>(() => initialPipes.map(pipeToRow));
+  // Which stage-queue section each row renders in -- deliberately NOT
+  // recomputed on every keystroke (see mergeRows below): typing a Repair
+  // Amt shouldn't yank the row out of Awaiting Repair before the admin
+  // also gets to fill in Skelp Welds on the same row (confirmed directly
+  // by the user -- this was the exact bug). A row only moves once Save
+  // confirms the new state with the server.
+  const [stageAssignment, setStageAssignment] = useState<Record<string, Stage>>(() =>
+    Object.fromEntries(initialPipes.map((p) => [String(p.id), stageOf(pipeToRow(p), config)]))
+  );
   const [saving, setSaving] = useState(false);
   const [warningsByRow, setWarningsByRow] = useState<Record<string, string[]>>({});
   const [errorsByRow, setErrorsByRow] = useState<Record<string, string[]>>({});
   const [saveError, setSaveError] = useState<string | null>(null);
   const [savedAt, setSavedAt] = useState<Date | null>(null);
+  const [showAllPipes, setShowAllPipes] = useState(false);
+  // Unsaved edits are easy to lose by accident (closing the tab,
+  // refreshing, clicking away to another page) -- flagged as critical by
+  // the user, so this is deliberately belt-and-suspenders: a native
+  // browser prompt on tab close/refresh/leaving the site, AND an in-app
+  // confirm before following any link away from this page while dirty.
+  const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+
+  useEffect(() => {
+    function handleBeforeUnload(e: BeforeUnloadEvent) {
+      if (!hasUnsavedChanges) return;
+      e.preventDefault();
+      e.returnValue = "";
+    }
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [hasUnsavedChanges]);
+
+  useEffect(() => {
+    function handleLinkClick(e: MouseEvent) {
+      if (!hasUnsavedChanges) return;
+      const anchor = (e.target as HTMLElement)?.closest("a");
+      const href = anchor?.getAttribute("href");
+      if (!href || href.startsWith("#")) return;
+      if (!window.confirm("You have unsaved changes on this page. Leave without saving?")) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    }
+    // Capture phase, so this runs before Next.js's own Link click handler.
+    document.addEventListener("click", handleLinkClick, true);
+    return () => document.removeEventListener("click", handleLinkClick, true);
+  }, [hasUnsavedChanges]);
 
   const defaultDimensions = formatDimensions(config.diameter, config.wall_thickness) ?? "";
 
@@ -315,121 +442,36 @@ export function PipeGrid({
   // Pipe numbers arrive in physical production order, but which planned
   // group each one turns out to be isn't known ahead of time (confirmed
   // directly by the user -- e.g. pipe 1 = 50ft, pipe 2 = 50ft, pipe 3 =
-  // 55ft, pipe 4 = 50ft again). So adding a row is: pick which group this
-  // next pipe belongs to (or "Manual"), then Add -- one click per pipe in
-  // the common case, or a quantity > 1 when several in a row share the
-  // same group.
-  const [addQty, setAddQty] = useState("1");
-  const [addLength, setAddLength] = useState("");
+  // 55ft, pipe 4 = 50ft again). So adding a pipe is: pick which group this
+  // next one belongs to, then Add -- exactly two actions, one pipe per
+  // click. Every pipe must come from a group (confirmed directly by the
+  // user) -- there's deliberately no "manual, no group" option here.
   const [selectedGroupId, setSelectedGroupId] = useState<string>("");
 
-  function handleGroupSelect(id: string) {
-    setSelectedGroupId(id);
-    if (id === "") {
-      setAddQty("1");
-      setAddLength("");
-      return;
-    }
-    const group = groups.find((g) => String(g.id) === id);
-    if (!group) return;
-    const remaining = Math.max(0, group.planned_qty - group.produced_qty);
-    setAddQty(String(remaining));
-    setAddLength(group.pipe_length_ft?.toString() ?? "");
+  // Merges an edited slice of rows (from any one stage section, or the
+  // All Pipes table) back into the full row list by rowId -- every section
+  // shares one merge path so "entering a repair amount for the first time
+  // marks the pipe Repaired and stamps today's Report Date as the repaired
+  // date" (so the admin never fills that bookkeeping in by hand) behaves
+  // identically everywhere. Only fires on the empty -> filled transition,
+  // so editing an already-repaired pipe's amount later never re-stamps it.
+  function mergeRows(edited: GridRow[]) {
+    setHasUnsavedChanges(true);
+    setRows((prev) => {
+      const editedById = new Map(edited.map((r) => [r.rowId, r]));
+      return prev.map((prevRow) => {
+        const next = editedById.get(prevRow.rowId);
+        if (!next) return prevRow;
+        if (prevRow.repair_amount.trim() === "" && next.repair_amount.trim() !== "") {
+          return { ...next, status: "Repaired", repaired_date: next.repaired_date || reportDate };
+        }
+        return next;
+      });
+    });
   }
 
-  const columns = useMemo<Column<GridRow>[]>(() => {
-    const base: Column<GridRow>[] = [
-      { key: "pipe_no", name: "Pipe No", renderEditCell: renderTextEditor, width: 90 },
-      { key: "dimensions", name: "Dimensions", renderEditCell: renderTextEditor, width: 130 },
-      { key: "pipe_length_ft", name: "Length (ft)", renderEditCell: renderTextEditor, width: 100 },
-      { key: "produced_date", name: "Produced Date", renderEditCell: renderTextEditor, width: 120 },
-      {
-        key: "status",
-        name: "Status",
-        width: 110,
-        renderEditCell: (props) => <StatusEditor {...props} />,
-      },
-      { key: "repair_amount", name: "Repair Amt", renderEditCell: renderTextEditor, width: 100 },
-      { key: "repair_amount_incl_skelp", name: "Repair Amt (B.E.)", renderEditCell: renderTextEditor, width: 120 },
-      {
-        key: "repair_ratio",
-        name: "Repair Ratio",
-        width: 100,
-        renderCell: ({ row }) => <RatioCell value={row.repair_ratio} />,
-      },
-      {
-        key: "repair_ratio_incl_skelp",
-        name: "Repair Ratio (B.E.)",
-        width: 120,
-        renderCell: ({ row }) => <RatioCell value={row.repair_ratio_incl_skelp} />,
-      },
-      { key: "repair_count", name: "Repair Cnt", renderEditCell: renderTextEditor, width: 90 },
-      { key: "repair_category", name: "Category", renderEditCell: renderTextEditor, width: 100 },
-      { key: "surface_state", name: "Surface", renderEditCell: renderTextEditor, width: 100 },
-      { key: "repaired_date", name: "Repaired Date", renderEditCell: renderTextEditor, width: 120 },
-      {
-        key: "features",
-        name: "Features",
-        width: 180,
-        renderCell: ({ row }) => <FeaturesCell row={row} />,
-        renderEditCell: (props) => <FeaturesEditor {...props} />,
-      },
-    ];
-
-    if (config.requires_additional_part) {
-      base.push(
-        { key: "additional_part_name", name: "Add'l Part", renderEditCell: renderTextEditor, width: 130 },
-        { key: "additional_part_qty", name: "Part Qty", renderEditCell: renderTextEditor, width: 90 },
-        {
-          key: "additional_part_assembled_date",
-          name: "Assembled",
-          width: 130,
-          renderCell: ({ row, onRowChange }) => (
-            <DoneDateCell
-              value={row.additional_part_assembled_date}
-              reportDate={reportDate}
-              onChange={(v) => onRowChange({ ...row, additional_part_assembled_date: v })}
-              confirmMessage="Remove the Assembled mark? This will also clear the assembled date."
-            />
-          ),
-          renderEditCell: undefined,
-        },
-        {
-          key: "additional_part_welded_date",
-          name: "Welded",
-          width: 130,
-          renderCell: ({ row, onRowChange }) => (
-            <DoneDateCell
-              value={row.additional_part_welded_date}
-              reportDate={reportDate}
-              onChange={(v) => onRowChange({ ...row, additional_part_welded_date: v })}
-              confirmMessage="Remove the Welded mark? This will also clear the welded date."
-            />
-          ),
-          renderEditCell: undefined,
-        }
-      );
-    }
-
-    if (config.requires_coating) {
-      base.push({
-        key: "coating_done",
-        name: "Coating",
-        width: 130,
-        renderCell: ({ row, onRowChange }) => (
-          <CoatingCell row={row} reportDate={reportDate} onRowChange={onRowChange} />
-        ),
-        renderEditCell: undefined,
-      });
-    }
-
-    base.push({ key: "shipped_date", name: "Shipped Date", renderEditCell: renderTextEditor, width: 120 });
-
-    return base;
-  }, [config.requires_additional_part, config.requires_coating, reportDate]);
-
   function handleRowsChange(newRows: GridRow[], _data: RowsChangeData<GridRow>) {
-    setRows(newRows);
+    mergeRows(newRows);
   }
 
   function nextPipeNo(): number {
@@ -437,30 +479,25 @@ export function PipeGrid({
     return nums.length > 0 ? Math.max(...nums) + 1 : 1;
   }
 
-  // The main way pipes get entered: pick which group this next pipe (or
-  // run of pipes) belongs to -- or leave it on "Manual" -- then Add.
-  // Auto-numbers from the next free pipe number and stamps produced_date
-  // from the Report Date, so the common case (one pipe at a time, as each
-  // is physically produced) is a single click once the group is picked.
-  function addRows() {
-    const qty = Math.trunc(Number(addQty));
-    if (!Number.isFinite(qty) || qty <= 0) return;
-    const group = groups.find((g) => String(g.id) === selectedGroupId) ?? null;
-    let nextNo = nextPipeNo();
-    const newRows: GridRow[] = [];
-    for (let i = 0; i < qty; i++) {
-      newRows.push(
-        emptyRow({
-          pipe_no: String(nextNo++),
-          dimensions: defaultDimensions,
-          pipe_length_ft: addLength.trim(),
-          produced_date: reportDate,
-          features: group?.features ?? [],
-          group_id: group?.id ?? null,
-        })
-      );
-    }
-    setRows((r) => [...r, ...newRows]);
+  // The only way pipes get entered: pick which group this next pipe
+  // belongs to, then Add -- one click adds one row, auto-numbered from the
+  // next free pipe number, with dimensions/length/features filled in from
+  // the group and produced_date from the Report Date. No-ops if no group
+  // is selected (the Add button is also disabled in that case).
+  function addPipe() {
+    const group = groups.find((g) => String(g.id) === selectedGroupId);
+    if (!group) return;
+    const row = emptyRow({
+      pipe_no: String(nextPipeNo()),
+      dimensions: defaultDimensions,
+      pipe_length_ft: group.pipe_length_ft?.toString() ?? "",
+      produced_date: reportDate,
+      features: group.features,
+      group_id: group.id,
+    });
+    setRows((r) => [...r, row]);
+    setStageAssignment((prev) => ({ ...prev, [row.rowId]: "repair" }));
+    setHasUnsavedChanges(true);
   }
 
   async function handleSave() {
@@ -482,23 +519,33 @@ export function PipeGrid({
       const nextWarnings: Record<string, string[]> = {};
       const nextErrors: Record<string, string[]> = {};
       const nextRows = [...rows];
+      const nextStages: Record<string, Stage> = {};
       results.forEach((r, i) => {
         const rowId = payload[i].rowId;
         if (r.ok && r.pipe) {
           if (r.warnings && r.warnings.length > 0) nextWarnings[rowId] = r.warnings;
           // Replace the local row with the server's version (real id,
-          // computed repair_ratio(_incl_skelp), derived shipped_bare) so
-          // the computed ratio shows up immediately, without a reload.
+          // computed repair_ratio(_incl_skelp)/repair_amount_incl_skelp,
+          // derived shipped_bare) so the computed values show up
+          // immediately, without a reload.
+          const savedRow = { ...pipeToRow(r.pipe), rowId };
           const idx = nextRows.findIndex((row) => row.rowId === rowId);
-          if (idx !== -1) nextRows[idx] = { ...pipeToRow(r.pipe), rowId };
+          if (idx !== -1) nextRows[idx] = savedRow;
+          // This is the one moment a row is allowed to move to its next
+          // stage-queue section -- confirmed and saved, not mid-edit.
+          nextStages[rowId] = stageOf(savedRow, config);
         } else {
           nextErrors[rowId] = [r.error ?? "Unknown error"];
         }
       });
       setRows(nextRows);
+      setStageAssignment((prev) => ({ ...prev, ...nextStages }));
       setWarningsByRow(nextWarnings);
       setErrorsByRow(nextErrors);
       setSavedAt(new Date());
+      // Rows that failed to save (nextErrors) are still unsaved -- only
+      // clear the warning once everything went through cleanly.
+      setHasUnsavedChanges(Object.keys(nextErrors).length > 0);
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -509,8 +556,282 @@ export function PipeGrid({
   const allWarnings = Object.entries(warningsByRow);
   const allErrors = Object.entries(errorsByRow);
 
+  // Filtered by the last-saved stageAssignment, not live field values --
+  // see the state comment above for why (a row must not visually jump
+  // sections mid-edit, before every field for its current stage is filled
+  // in and saved).
+  const repairRows = useMemo(
+    () => rows.filter((r) => (stageAssignment[r.rowId] ?? stageOf(r, config)) === "repair"),
+    [rows, stageAssignment, config]
+  );
+  const additionalPartRows = useMemo(
+    () =>
+      config.requires_additional_part
+        ? rows.filter((r) => (stageAssignment[r.rowId] ?? stageOf(r, config)) === "additional_part")
+        : [],
+    [rows, stageAssignment, config]
+  );
+  const coatingRows = useMemo(
+    () =>
+      config.requires_coating
+        ? rows.filter((r) => (stageAssignment[r.rowId] ?? stageOf(r, config)) === "coating")
+        : [],
+    [rows, stageAssignment, config]
+  );
+  const shipRows = useMemo(
+    () => rows.filter((r) => (stageAssignment[r.rowId] ?? stageOf(r, config)) === "ship"),
+    [rows, stageAssignment, config]
+  );
+
+  // Project-wide roll-up (Produced/Repaired/Shipped counts, an overall
+  // weighted repair ratio) -- same "sum of amounts over sum of spiral
+  // lengths" methodology as the public Dashboard's dailyWeightedRepairRatios
+  // (src/lib/dashboard.ts), just scoped to this one project's pipes.
+  const summaryStats = useMemo(() => {
+    let totalRepairM = 0;
+    let totalSpiralM = 0;
+    let repairedCount = 0;
+    for (const r of rows) {
+      const amount = numOrNull(r.repair_amount);
+      if (amount == null) continue;
+      repairedCount += 1;
+      const spiral = computeSpiralLengthM(config, numOrNull(r.pipe_length_ft));
+      if (spiral != null) {
+        totalRepairM += amount;
+        totalSpiralM += spiral;
+      }
+    }
+    const shippedCount = rows.filter((r) => r.shipped_date.trim() !== "").length;
+    return {
+      producedCount: rows.length,
+      repairedCount,
+      shippedCount,
+      overallRatio: computeRepairRatio(totalRepairM || null, totalSpiralM || null),
+    };
+  }, [rows, config]);
+
+  const repairColumns = useMemo<Column<GridRow>[]>(
+    () => [
+      { key: "pipe_no", name: "Pipe No", renderEditCell: renderTextEditor, width: 80 },
+      { key: "dimensions", name: "Dimensions", renderEditCell: renderTextEditor, width: 120 },
+      { key: "pipe_length_ft", name: "Length (ft)", renderEditCell: renderTextEditor, width: 100 },
+      { key: "produced_date", name: "Produced Date", renderEditCell: renderTextEditor, width: 120 },
+      { key: "repair_amount", name: "Repair Amt", renderEditCell: renderTextEditor, width: 100 },
+      { key: "skelp_weld_count", name: "Skelp Welds", renderEditCell: renderTextEditor, width: 100 },
+      {
+        key: "repair_amount_incl_skelp",
+        name: "Repair Amt (B.E.)",
+        width: 120,
+        renderCell: ({ row }) => <AmountCell value={row.repair_amount_incl_skelp} />,
+      },
+      {
+        key: "repair_ratio",
+        name: "Repair Ratio",
+        width: 100,
+        renderCell: ({ row }) => <RatioCell value={row.repair_ratio} />,
+      },
+      {
+        key: "repair_ratio_incl_skelp",
+        name: "Repair Ratio (B.E.)",
+        width: 120,
+        renderCell: ({ row }) => <RatioCell value={row.repair_ratio_incl_skelp} />,
+      },
+      { key: "repair_count", name: "Repair Cnt", renderEditCell: renderTextEditor, width: 90 },
+    ],
+    []
+  );
+
+  const additionalPartColumns = useMemo<Column<GridRow>[]>(
+    () => [
+      { key: "pipe_no", name: "Pipe No", renderEditCell: renderTextEditor, width: 80 },
+      { key: "dimensions", name: "Dimensions", renderEditCell: renderTextEditor, width: 120 },
+      {
+        key: "additional_part_assembled_date",
+        name: "Assembled",
+        width: 130,
+        renderCell: ({ row, onRowChange }) => (
+          <DoneDateCell
+            value={row.additional_part_assembled_date}
+            reportDate={reportDate}
+            onChange={(v) => onRowChange({ ...row, additional_part_assembled_date: v })}
+            confirmMessage="Remove the Assembled mark? This will also clear the assembled date."
+          />
+        ),
+      },
+      {
+        key: "additional_part_welded_date",
+        name: "Welded",
+        width: 130,
+        renderCell: ({ row, onRowChange }) => (
+          <DoneDateCell
+            value={row.additional_part_welded_date}
+            reportDate={reportDate}
+            onChange={(v) => onRowChange({ ...row, additional_part_welded_date: v })}
+            confirmMessage="Remove the Welded mark? This will also clear the welded date."
+          />
+        ),
+      },
+    ],
+    [reportDate]
+  );
+
+  const coatingColumns = useMemo<Column<GridRow>[]>(
+    () => [
+      { key: "pipe_no", name: "Pipe No", renderEditCell: renderTextEditor, width: 80 },
+      { key: "dimensions", name: "Dimensions", renderEditCell: renderTextEditor, width: 120 },
+      {
+        key: "coating_done",
+        name: "Coating",
+        width: 130,
+        renderCell: ({ row, onRowChange }) => (
+          <CoatingCell row={row} reportDate={reportDate} onRowChange={onRowChange} />
+        ),
+      },
+    ],
+    [reportDate]
+  );
+
+  const shipColumns = useMemo<Column<GridRow>[]>(
+    () => [
+      { key: "pipe_no", name: "Pipe No", renderEditCell: renderTextEditor, width: 80 },
+      { key: "dimensions", name: "Dimensions", renderEditCell: renderTextEditor, width: 120 },
+      {
+        key: "shipped_date",
+        name: "Shipped",
+        width: 130,
+        renderCell: ({ row, onRowChange }) => (
+          <DoneDateCell
+            value={row.shipped_date}
+            reportDate={reportDate}
+            onChange={(v) => onRowChange({ ...row, shipped_date: v })}
+            confirmMessage="Remove the Shipped mark? This will also clear the shipped date."
+          />
+        ),
+      },
+    ],
+    [reportDate]
+  );
+
+  // The full, every-column table -- kept for the rare out-of-order
+  // correction (e.g. fixing a pipe that shipped before its coating was
+  // recorded) that the stage queues above don't surface once a pipe has
+  // moved past a stage. Collapsed by default so it doesn't recreate the
+  // "wall of columns" problem the queues exist to solve.
+  const allColumns = useMemo<Column<GridRow>[]>(() => {
+    const base: Column<GridRow>[] = [
+      { key: "pipe_no", name: "Pipe No", renderEditCell: renderTextEditor, width: 90 },
+      { key: "dimensions", name: "Dimensions", renderEditCell: renderTextEditor, width: 130 },
+      { key: "pipe_length_ft", name: "Length (ft)", renderEditCell: renderTextEditor, width: 100 },
+      { key: "produced_date", name: "Produced Date", renderEditCell: renderTextEditor, width: 120 },
+      {
+        key: "status",
+        name: "Status",
+        width: 110,
+        renderEditCell: (props) => <StatusEditor {...props} />,
+      },
+      { key: "repair_amount", name: "Repair Amt", renderEditCell: renderTextEditor, width: 100 },
+      { key: "skelp_weld_count", name: "Skelp Welds", renderEditCell: renderTextEditor, width: 100 },
+      {
+        key: "repair_amount_incl_skelp",
+        name: "Repair Amt (B.E.)",
+        width: 120,
+        renderCell: ({ row }) => <AmountCell value={row.repair_amount_incl_skelp} />,
+      },
+      {
+        key: "repair_ratio",
+        name: "Repair Ratio",
+        width: 100,
+        renderCell: ({ row }) => <RatioCell value={row.repair_ratio} />,
+      },
+      {
+        key: "repair_ratio_incl_skelp",
+        name: "Repair Ratio (B.E.)",
+        width: 120,
+        renderCell: ({ row }) => <RatioCell value={row.repair_ratio_incl_skelp} />,
+      },
+      { key: "repair_count", name: "Repair Cnt", renderEditCell: renderTextEditor, width: 90 },
+      { key: "repaired_date", name: "Repaired Date", renderEditCell: renderTextEditor, width: 120 },
+      {
+        key: "features",
+        name: "Features",
+        width: 180,
+        renderCell: ({ row }) => <FeaturesCell row={row} />,
+        renderEditCell: (props) => <FeaturesEditor {...props} />,
+      },
+    ];
+
+    if (config.requires_additional_part) {
+      base.push(
+        {
+          key: "additional_part_assembled_date",
+          name: "Assembled",
+          width: 130,
+          renderCell: ({ row, onRowChange }) => (
+            <DoneDateCell
+              value={row.additional_part_assembled_date}
+              reportDate={reportDate}
+              onChange={(v) => onRowChange({ ...row, additional_part_assembled_date: v })}
+              confirmMessage="Remove the Assembled mark? This will also clear the assembled date."
+            />
+          ),
+        },
+        {
+          key: "additional_part_welded_date",
+          name: "Welded",
+          width: 130,
+          renderCell: ({ row, onRowChange }) => (
+            <DoneDateCell
+              value={row.additional_part_welded_date}
+              reportDate={reportDate}
+              onChange={(v) => onRowChange({ ...row, additional_part_welded_date: v })}
+              confirmMessage="Remove the Welded mark? This will also clear the welded date."
+            />
+          ),
+        }
+      );
+    }
+
+    if (config.requires_coating) {
+      base.push({
+        key: "coating_done",
+        name: "Coating",
+        width: 130,
+        renderCell: ({ row, onRowChange }) => (
+          <CoatingCell row={row} reportDate={reportDate} onRowChange={onRowChange} />
+        ),
+      });
+    }
+
+    base.push({
+      key: "shipped_date",
+      name: "Shipped",
+      width: 130,
+      renderCell: ({ row, onRowChange }) => (
+        <DoneDateCell
+          value={row.shipped_date}
+          reportDate={reportDate}
+          onChange={(v) => onRowChange({ ...row, shipped_date: v })}
+          confirmMessage="Remove the Shipped mark? This will also clear the shipped date."
+        />
+      ),
+    });
+
+    return base;
+  }, [config.requires_additional_part, config.requires_coating, reportDate]);
+
   return (
     <div>
+      <div className="mb-4 flex flex-wrap gap-3">
+        <SummaryCard label="Produced" value={String(summaryStats.producedCount)} />
+        <SummaryCard label="Repaired" value={String(summaryStats.repairedCount)} />
+        <SummaryCard label="Shipped" value={String(summaryStats.shippedCount)} />
+        <SummaryCard
+          label="Overall Repair Ratio"
+          value={summaryStats.overallRatio != null ? `${(summaryStats.overallRatio * 100).toFixed(2)}%` : "—"}
+          accent
+        />
+      </div>
+
       <div className="mb-3 flex flex-wrap items-center gap-3">
         <label className="flex items-center gap-2 text-sm text-slate-600">
           Report Date
@@ -528,85 +849,137 @@ export function PipeGrid({
         >
           {saving ? "Saving…" : "Save"}
         </button>
-        {savedAt && (
-          <span className="flex items-center gap-1 text-sm text-emerald-600">
-            Saved ({savedAt.toLocaleTimeString()})
+        {hasUnsavedChanges ? (
+          <span className="flex items-center gap-1 text-sm font-medium text-amber-600">
+            ● Unsaved changes
           </span>
+        ) : (
+          savedAt && (
+            <span className="flex items-center gap-1 text-sm text-emerald-600">
+              Saved ({savedAt.toLocaleTimeString()})
+            </span>
+          )
         )}
         {saveError && <span className="text-sm text-red-600">{saveError}</span>}
       </div>
 
-      <div className="mb-3 flex flex-wrap items-end gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
-        {groups.length > 0 && (
-          <label className="flex flex-col text-xs text-slate-500">
-            Group
-            <select
-              value={selectedGroupId}
-              onChange={(e) => handleGroupSelect(e.target.value)}
-              className="mt-1 rounded border border-slate-300 px-2 py-1 text-sm outline-none focus:border-blue-500"
-            >
-              <option value="">— Manual —</option>
-              {groups.map((g) => (
-                <option key={g.id} value={g.id}>
-                  {g.label ?? `Group ${g.id}`} ({g.produced_qty}/{g.planned_qty})
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-        <label className="flex flex-col text-xs text-slate-500">
-          Quantity
-          <input
-            type="number"
-            min={1}
-            value={addQty}
-            onChange={(e) => setAddQty(e.target.value)}
-            className="mt-1 w-20 rounded border border-slate-300 px-2 py-1 text-sm outline-none focus:border-blue-500"
-          />
-        </label>
-        <label className="flex flex-col text-xs text-slate-500">
-          Length (ft)
-          <input
-            type="number"
-            step="any"
-            value={addLength}
-            onChange={(e) => setAddLength(e.target.value)}
-            placeholder="e.g. 77"
-            className="mt-1 w-24 rounded border border-slate-300 px-2 py-1 text-sm outline-none focus:border-blue-500"
-          />
-        </label>
-        <button
-          onClick={addRows}
-          className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700"
-        >
-          + Add
-        </button>
-        <span className="pb-1.5 text-xs text-slate-400">
-          Pipe No continues automatically; Produced Date fills in from the Report Date — editable in the grid.
-        </span>
-      </div>
+      {groups.length === 0 ? (
+        <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+          This project has no groups yet — every pipe must belong to a group.{" "}
+          <Link href={`/admin/projects?groupProject=${projectNo}`} className="font-medium underline">
+            Add a group on the Projects page
+          </Link>{" "}
+          before entering pipes.
+        </div>
+      ) : (
+        <div className="mb-5 flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+          <span className="text-sm text-slate-500">Next pipe: #{nextPipeNo()}</span>
+          <select
+            value={selectedGroupId}
+            onChange={(e) => setSelectedGroupId(e.target.value)}
+            className="rounded border border-slate-300 px-2 py-1.5 text-sm outline-none focus:border-blue-500"
+          >
+            <option value="" disabled>
+              Select a group…
+            </option>
+            {groups.map((g) => (
+              <option key={g.id} value={g.id}>
+                {g.label ?? `Group ${g.id}`} — {g.pipe_length_ft ?? "?"} ft ({g.produced_qty}/{g.planned_qty})
+              </option>
+            ))}
+          </select>
+          <button
+            onClick={addPipe}
+            disabled={selectedGroupId === ""}
+            className="rounded-lg bg-blue-600 px-4 py-1.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            + Add
+          </button>
+        </div>
+      )}
 
-      <div
-        className="rdg-light overflow-hidden rounded-xl border border-slate-200"
-        style={
-          {
-            "--rdg-border-color": "#e2e8f0",
-            "--rdg-header-background-color": "#f8fafc",
-            "--rdg-row-hover-background-color": "#eff6ff",
-            "--rdg-selection-color": "#2563eb",
-            "--rdg-color": "#1e293b",
-            "--rdg-font-size": "13px",
-          } as React.CSSProperties
-        }
+      <StageSection
+        title="Awaiting Repair"
+        summary={`${repairRows.length} pipe${repairRows.length === 1 ? "" : "s"} awaiting repair`}
+        rows={repairRows}
+        columns={repairColumns}
+        onRowsChange={mergeRows}
+        onSave={handleSave}
+        saving={saving}
+      />
+      <StageSection
+        title="Awaiting Additional Part"
+        summary={`${additionalPartRows.length} pipe${additionalPartRows.length === 1 ? "" : "s"} awaiting additional part`}
+        rows={additionalPartRows}
+        columns={additionalPartColumns}
+        onRowsChange={mergeRows}
+        onSave={handleSave}
+        saving={saving}
+      />
+      <StageSection
+        title="Awaiting Coating"
+        summary={`${coatingRows.length} pipe${coatingRows.length === 1 ? "" : "s"} awaiting coating`}
+        rows={coatingRows}
+        columns={coatingColumns}
+        onRowsChange={mergeRows}
+        onSave={handleSave}
+        saving={saving}
+      />
+      <StageSection
+        title="Awaiting Shipment"
+        summary={`${shipRows.length} pipe${shipRows.length === 1 ? "" : "s"} awaiting shipment`}
+        rows={shipRows}
+        columns={shipColumns}
+        onRowsChange={mergeRows}
+        onSave={handleSave}
+        saving={saving}
+      />
+
+      <button
+        onClick={() => setShowAllPipes((v) => !v)}
+        className="mb-2 text-sm font-medium text-blue-600 hover:underline"
       >
-        <DataGrid
-          columns={columns}
-          rows={rows}
-          onRowsChange={handleRowsChange}
-          rowKeyGetter={(row: GridRow) => row.rowId}
-          style={{ blockSize: 480, border: "none" }}
-        />
-      </div>
+        {showAllPipes ? "Hide All Pipes" : `Show All Pipes (${rows.length})`}
+      </button>
+
+      {showAllPipes && (
+        <div className="mb-5">
+          <div
+            className="rdg-light overflow-hidden rounded-xl border border-slate-200"
+            style={
+              {
+                "--rdg-border-color": "#e2e8f0",
+                "--rdg-header-background-color": "#f8fafc",
+                "--rdg-row-hover-background-color": "#eff6ff",
+                "--rdg-selection-color": "#2563eb",
+                "--rdg-color": "#1e293b",
+                "--rdg-font-size": "13px",
+              } as React.CSSProperties
+            }
+          >
+            <DataGrid
+              columns={allColumns}
+              rows={rows}
+              onRowsChange={handleRowsChange}
+              rowKeyGetter={(row: GridRow) => row.rowId}
+              style={{ blockSize: 480, border: "none" }}
+            />
+          </div>
+          <div className="mt-1.5 flex items-center justify-between">
+            <p className="text-xs text-slate-500">
+              {rows.length} pipe{rows.length === 1 ? "" : "s"} total, every field editable — use this to fix
+              anything out of order.
+            </p>
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="rounded-lg bg-blue-600 px-3 py-1 text-xs font-medium text-white shadow-sm transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {saving ? "Saving…" : "Save"}
+            </button>
+          </div>
+        </div>
+      )}
 
       {allErrors.length > 0 && (
         <div className="mt-4 rounded-xl border border-red-200 bg-red-50 p-4">

@@ -197,6 +197,23 @@ export function computeRepairRatio(
   return repairAmountM / spiralLengthM;
 }
 
+// Each skelp-end weld ("bant eki") adds a fixed 1.5m to the repair amount
+// (confirmed directly by the user). Server-computed only -- the admin
+// types repair_amount and skelp_weld_count, never a B.E. total; this is
+// the one place those turn into "Total Repair Amount incl. Skelp-end
+// Welds." Structurally can never come out smaller than repairAmountM
+// (the original "M35 bug," PROJECT_PLAN.md section 1) since it's always
+// repairAmountM plus a non-negative addition.
+const SKELP_WELD_LENGTH_M = 1.5;
+
+export function computeRepairAmountInclSkelp(
+  repairAmountM: number | null,
+  skelpWeldCount: number | null
+): number | null {
+  if (repairAmountM == null) return null;
+  return repairAmountM + (skelpWeldCount ?? 0) * SKELP_WELD_LENGTH_M;
+}
+
 // "Warn, don't block" (PROJECT_PLAN.md section 5 / 6): a later stage can be
 // saved before an earlier required one. This never prevents a save — the
 // caller (the entry form) surfaces these as inline warnings alongside the
@@ -211,7 +228,7 @@ export function computeStageWarnings(
   const warnings: string[] = [];
 
   if (
-    (pipe.repair_amount != null || pipe.repair_amount_incl_skelp != null) &&
+    (pipe.repair_amount != null || pipe.skelp_weld_count != null) &&
     computeSpiralLengthM(config, pipe.pipe_length_ft) == null
   ) {
     warnings.push(
@@ -258,10 +275,14 @@ export function computeStageWarnings(
 
 // Field-level validation -- this is the actual point of the rewrite (see
 // PROJECT_PLAN.md section 1 and 6): a value that's structurally wrong (not
-// a number, not a real date, an incl.-skelp amount smaller than the base
-// amount) gets REJECTED before it reaches the database, the same way
-// dash_app's validators.py should have caught the original M35 typo at
-// entry time instead of at import time. This is deliberately separate from
+// a number, not a real date, a negative count) gets REJECTED before it
+// reaches the database, the same way dash_app's validators.py should have
+// caught the original M35 typo at entry time instead of at import time.
+// (That specific bug -- an incl.-skelp amount saved smaller than the base
+// amount -- no longer needs a check here at all: repair_amount_incl_skelp
+// is computed as repair_amount + skelp_weld_count * 1.5, so it can never
+// come out smaller in the first place. See computeRepairAmountInclSkelp.)
+// This is deliberately separate from
 // computeStageWarnings above: a warning means "this is plausible but
 // unusual, saved anyway"; a validation error here means "this value can't
 // be true," and blocks the save entirely.
@@ -308,33 +329,13 @@ export function validatePipeInput(input: PipeInput): string[] {
     errors.push("Repair Amt cannot be negative.");
   }
   if (
-    input.repair_amount_incl_skelp != null &&
-    (Number.isNaN(input.repair_amount_incl_skelp) || input.repair_amount_incl_skelp < 0)
+    input.skelp_weld_count != null &&
+    (!Number.isInteger(input.skelp_weld_count) || input.skelp_weld_count < 0)
   ) {
-    errors.push("Repair Amt (B.E.) cannot be negative.");
-  }
-  if (input.repair_amount_incl_skelp != null && input.repair_amount == null) {
-    errors.push("Repair Amt must also be entered if Repair Amt (B.E.) is entered.");
-  }
-  if (
-    input.repair_amount_incl_skelp != null &&
-    input.repair_amount != null &&
-    input.repair_amount_incl_skelp < input.repair_amount
-  ) {
-    // This is the original motivating bug (PROJECT_PLAN.md section 1, the
-    // "M35" incident): the incl.-skelp amount was once saved smaller than
-    // the base amount. Structurally impossible now -- hard block, not a
-    // warning.
-    errors.push("Repair Amt (B.E.) cannot be smaller than the base Repair Amt.");
+    errors.push("Skelp Weld Count must be a non-negative integer.");
   }
   if (input.repair_count != null && (!Number.isInteger(input.repair_count) || input.repair_count < 0)) {
     errors.push("Repair Count must be a non-negative integer.");
-  }
-  if (
-    input.additional_part_qty != null &&
-    (!Number.isInteger(input.additional_part_qty) || input.additional_part_qty < 0)
-  ) {
-    errors.push("Part Qty must be a non-negative integer.");
   }
 
   return errors;
@@ -364,8 +365,9 @@ export async function upsertPipe(input: PipeInput): Promise<UpsertPipeResult> {
   const shipped_bare = deriveShippedBare(input, effectiveConfig);
 
   const spiralLengthM = computeSpiralLengthM(effectiveConfig, input.pipe_length_ft);
+  const repair_amount_incl_skelp = computeRepairAmountInclSkelp(input.repair_amount, input.skelp_weld_count);
   const repair_ratio = computeRepairRatio(input.repair_amount, spiralLengthM);
-  const repair_ratio_incl_skelp = computeRepairRatio(input.repair_amount_incl_skelp, spiralLengthM);
+  const repair_ratio_incl_skelp = computeRepairRatio(repair_amount_incl_skelp, spiralLengthM);
 
   const supabase = createServiceRoleClient();
   const { data, error } = await supabase
@@ -373,6 +375,7 @@ export async function upsertPipe(input: PipeInput): Promise<UpsertPipeResult> {
     .upsert(
       {
         ...input,
+        repair_amount_incl_skelp,
         repair_ratio,
         repair_ratio_incl_skelp,
         shipped_bare,

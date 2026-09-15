@@ -77,10 +77,19 @@ create table if not exists pipes (
 
     -- Stage 2: Repaired
     repair_amount numeric,
+    -- Count of skelp-end welds ("bant eki") on this pipe -- the admin
+    -- types this count, never a separate B.E. amount (confirmed directly
+    -- by the user). Each one adds a fixed 1.5m to the repair amount --
+    -- see SKELP_WELD_LENGTH_M / computeRepairAmountInclSkelp in
+    -- src/lib/pipes.ts.
+    skelp_weld_count integer,
     -- "Total Repair Amount incl. Skelp-end Welds (B.E.)" in the real
-    -- sheets -- the original "M35 bug" (PROJECT_PLAN.md section 1) was
-    -- this value once saved smaller than repair_amount; validatePipeInput
-    -- in src/lib/pipes.ts now makes that structurally impossible.
+    -- sheets = repair_amount + skelp_weld_count * 1.5m. SERVER-COMPUTED
+    -- ONLY (computeRepairAmountInclSkelp in src/lib/pipes.ts) -- never
+    -- accepted from the client, which makes the original "M35 bug"
+    -- (PROJECT_PLAN.md section 1: this value once saved smaller than
+    -- repair_amount) structurally unrepresentable, not just validated
+    -- against.
     repair_amount_incl_skelp numeric,
     -- Both ratios are SERVER-COMPUTED ONLY (computeRepairRatio in
     -- src/lib/pipes.ts) -- never accepted from the client. PipeInput
@@ -90,17 +99,14 @@ create table if not exists pipes (
     repair_ratio numeric,
     repair_ratio_incl_skelp numeric,
     repair_count integer,
-    repair_category text,
-    surface_state text,
     repaired_date date,
     status text not null default 'Produced' check (status in ('Produced', 'Repaired')),
 
-    -- Stages 3/4: additional part — only meaningful when this project's
-    -- project_stage_config.requires_additional_part is true. Free-text name
-    -- since the part varies per work order (e.g. a clutch); exact field
-    -- naming can be refined later without a breaking migration.
-    additional_part_name text,
-    additional_part_qty integer,
+    -- Stages 3/4: additional part -- only meaningful when this project's
+    -- project_stage_config.requires_additional_part is true. Confirmed
+    -- unused: additional_part_name/qty (what part, how many) were in the
+    -- original scaffold but never actually needed -- see the CLEANUP block
+    -- below. Only the two completion dates remain.
     additional_part_assembled_date date,
     additional_part_welded_date date,
 
@@ -164,8 +170,26 @@ alter table pipes enable row level security;
 -- alter table project_stage_config add column if not exists archived boolean not null default false;
 -- alter table pipes add column if not exists repair_amount_incl_skelp numeric;
 -- alter table pipes add column if not exists repair_ratio_incl_skelp numeric;
+-- alter table pipes add column if not exists skelp_weld_count integer;
 -- (project_pipe_groups is a brand-new table -- the uncommented
 -- `create table if not exists project_pipe_groups` above already handles
 -- creating it on the live DB too. Run that BEFORE the line below, since
 -- this FK needs the table to exist first.)
 -- alter table pipes add column if not exists group_id bigint references project_pipe_groups(id) on delete set null;
+
+-- ---------------------------------------------------------------------------
+-- CLEANUP (confirmed unused by the user, 2026-09-14): repair_category,
+-- surface_state, additional_part_name, and additional_part_qty were
+-- inherited from the original scaffold (mirroring dash_app's
+-- pipe_repair_details columns / an early guess at additional-part
+-- tracking) but were never actually used -- the Features tag picker
+-- already covers "does this pipe have a Clutch/Drive Shoe/etc." Removed
+-- from the app's types/UI already. DESTRUCTIVE -- drops any values already
+-- saved in these columns. Only run this if/when you're sure nothing needs
+-- them; safe to leave the columns sitting unused in the meantime if you'd
+-- rather not run a DROP right now.
+-- ---------------------------------------------------------------------------
+-- alter table pipes drop column if exists repair_category;
+-- alter table pipes drop column if exists surface_state;
+-- alter table pipes drop column if exists additional_part_name;
+-- alter table pipes drop column if exists additional_part_qty;

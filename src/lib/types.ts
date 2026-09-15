@@ -61,21 +61,22 @@ export interface Pipe {
   produced_date: string;
 
   repair_amount: number | null;
-  // "Total Repair Amount incl. Skelp-end Welds (B.E.)" -- see
-  // supabase/schema.sql's pipes.repair_amount_incl_skelp comment.
+  // Count of skelp-end welds ("bant eki") -- the only thing the admin
+  // types for the B.E. side; see the skelp_weld_count comment in
+  // supabase/schema.sql.
+  skelp_weld_count: number | null;
+  // "Total Repair Amount incl. Skelp-end Welds (B.E.)" -- server-computed
+  // only (computeRepairAmountInclSkelp in lib/pipes.ts) from repair_amount
+  // + skelp_weld_count. PipeInput omits this.
   repair_amount_incl_skelp: number | null;
   // Both server-computed only (computeRepairRatio in lib/pipes.ts) --
   // never accept these from the client. PipeInput omits both.
   repair_ratio: number | null;
   repair_ratio_incl_skelp: number | null;
   repair_count: number | null;
-  repair_category: string | null;
-  surface_state: string | null;
   repaired_date: string | null;
   status: PipeStatus;
 
-  additional_part_name: string | null;
-  additional_part_qty: number | null;
   additional_part_assembled_date: string | null;
   additional_part_welded_date: string | null;
 
@@ -102,9 +103,10 @@ export interface Pipe {
 // id/created_at/updated_at/shipped_bare are server-derived, never accepted
 // from the client (shipped_bare in particular is *computed*, see
 // deriveShippedBare in pipes.ts — it is never a field someone fills in).
-// repair_ratio/repair_ratio_incl_skelp are likewise server-derived (see
-// computeRepairRatio in pipes.ts) -- the client only ever sends the raw
-// repair amount(s), never a ratio.
+// repair_ratio/repair_ratio_incl_skelp/repair_amount_incl_skelp are
+// likewise server-derived (see computeRepairRatio /
+// computeRepairAmountInclSkelp in pipes.ts) -- the client only ever sends
+// the raw repair amount and skelp-weld count, never a ratio or B.E. total.
 export type PipeInput = Omit<
   Pipe,
   | "id"
@@ -113,4 +115,5 @@ export type PipeInput = Omit<
   | "shipped_bare"
   | "repair_ratio"
   | "repair_ratio_incl_skelp"
+  | "repair_amount_incl_skelp"
 >;
