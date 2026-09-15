@@ -17,6 +17,9 @@ export default function ProtectedAdminLayout({ children }: { children: React.Rea
               <Link href="/admin/pipes" className="text-slate-600 hover:text-slate-900">
                 Pipes
               </Link>
+              <Link href="/board" className="text-slate-600 hover:text-slate-900">
+                Board
+              </Link>
               <Link href="/" className="text-slate-600 hover:text-slate-900">
                 Public Dashboard
               </Link>

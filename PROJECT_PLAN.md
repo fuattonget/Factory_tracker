@@ -182,6 +182,25 @@ need to be a pixel-identical copy of that layout, but it should preserve
 the *at-a-glance, color-coded, grid-shaped* feel — that visual language is
 already proven to work for this team.
 
+**Revised (2026-09-15): one flat table was the wrong shape.** The original
+single spreadsheet (every pipe, every lifecycle-stage column, all in one
+`react-data-grid`) shipped first and got real usage — the concrete
+complaint back was that finding one specific pipe in a wall of columns was
+hard, and that entering a Repair Amt visibly yanked the row out from under
+the admin (see section 8's 2026-09-15 entries) before they'd finished
+filling in every field for that stage. The Pipes page (`PipeGrid.tsx`) is
+now **stacked stage-queue tables** instead: "Awaiting Repair" → "Awaiting
+Additional Part" (if the project requires it) → "Awaiting Coating" (if
+required) → "Awaiting Shipment", each a small table with only the columns
+relevant to that stage, plus a project-wide summary-card row (Produced /
+Repaired / Shipped / Overall Repair Ratio) and a collapsible "All Pipes"
+table (every column, every row) underneath for out-of-order corrections
+the queues don't surface once a pipe has moved past a stage. A pipe
+appears in exactly one queue at a time and only moves to the next one when
+**Save** confirms the new state with the server — never live, mid-edit
+(`stageAssignment` state in `PipeGrid.tsx`) — precisely so partially-filled
+stage data never causes a premature jump.
+
 ## 5. The pipe lifecycle model
 
 **This is the most important, and least finalized, part of the whole
@@ -325,26 +344,33 @@ formulas):
   `null` with a non-blocking warning (`computeStageWarnings`) — never a
   hard validation error, same "warn, don't block" principle as the
   lifecycle-stage warnings above.
-- **Base vs. incl.-skelp split, ported properly this time.** The real
-  sheets track two repair amounts/ratios — a base one and a "with
-  Skelp-end Welds (B.E.)" variant. `pipes.repair_amount_incl_skelp` +
-  computed `repair_ratio_incl_skelp` mirror this. Critically,
-  `validatePipeInput` now hard-blocks saving an incl.-skelp amount smaller
-  than the base amount — this is the exact original "M35" bug from
-  section 1, now structurally impossible instead of merely fixed once.
-- **Planned "groups" break a project's total pipe count into sub-batches**
-  — e.g. "Grup 1: 10 pipes, 55ft, has Clutch" + "Grup 2: 50 pipes, 50ft, no
-  Clutch" in the *same* project (dimension/band-width stay fixed at the
-  project level per above). This is planning/target data set up once at
-  project-setup time (`project_pipe_groups` table: `label`, `planned_qty`,
-  `pipe_length_ft`, `features`), separate from the actual `pipes` rows
-  produced day by day. The Borular entry grid's "Gruptan ekle" bulk-add
-  reads a project's groups to pre-fill quantity (defaults to the
-  *remaining* planned count, i.e. `planned_qty` minus how many pipes are
-  already tagged with that `group_id`), length, and features in one click.
-  `pipes.group_id` (nullable, `on delete set null`) tags which group a row
-  came from, purely for "8 of 10 from Group 1 produced so far" progress
-  display — never required, never affects validation.
+- **Base vs. incl.-skelp split — revised again 2026-09-15.** The admin
+  never types a B.E. amount directly (an earlier version of this had them
+  type both `repair_amount` and `repair_amount_incl_skelp`, redundantly).
+  Confirmed directly by the user: each skelp-end weld ("bant eki") adds a
+  fixed **1.5 meters**. The admin types `repair_amount` and
+  `skelp_weld_count` (an integer count); `repair_amount_incl_skelp =
+  repair_amount + skelp_weld_count * 1.5` is computed server-side
+  (`computeRepairAmountInclSkelp` in `src/lib/pipes.ts`), same as the
+  ratios. This makes the original "M35" bug (section 1) not just
+  hard-blocked but **structurally unrepresentable** — the computed value
+  can never come out smaller than `repair_amount` in the first place.
+- **Planned "groups" — every pipe must belong to one, entered one pipe at
+  a time.** A project's total pipe count is broken into named sub-batches
+  ("Group 1: 10 pipes, 55ft, has Clutch" + "Group 2: 50 pipes, 50ft, no
+  Clutch" in the *same* project; dimension/band-width stay fixed at the
+  project level per above) via the `project_pipe_groups` table (`label`,
+  `planned_qty`, `pipe_length_ft`, `features`), set up once at
+  project-setup time. Revised from an earlier "bulk-add N rows" design:
+  confirmed directly by the user, pipe numbers arrive in physical
+  production order but *which planned group* the next one turns out to be
+  isn't known ahead of time (e.g. pipe 1 = 50ft, pipe 2 = 50ft, pipe 3 =
+  55ft, pipe 4 = 50ft again) — so the Pipes page's entry control is
+  "select a group, click **+ Add**," one pipe per click, auto-numbered.
+  **A pipe with no group is deliberately not allowed** — there is no
+  "manual" bypass. `pipes.group_id` (nullable only for pipes that predate
+  this rule, `on delete set null`) tags which group a row came from, for
+  "8 of 10 from Group 1 produced so far" progress display.
 - **New project-level fields**: `production_type` (`Coil`/`Plate`, matches
   the categorization the public Dashboard's "Repair Rate Trend by
   Production Type" chart already uses), `project_status` (`In Progress` /
@@ -353,10 +379,38 @@ formulas):
   project is hidden from the daily-entry project picker by default but
   never hard-deleted, and every pipe under it is untouched).
 - **Daily entry workflow**: the admin's job each day is entering
-  *yesterday's* floor activity from a report. The Borular page has a
-  single "Rapor Tarihi" (Report Date) picker, defaulting to yesterday,
-  that stamps `produced_date` for every new row added in that session
-  (single or bulk) — still editable per row afterward for correction.
+  *yesterday's* floor activity from a report. The Pipes page has a single
+  Report Date picker, defaulting to yesterday, that stamps `produced_date`
+  for every new pipe added in that session, and is also what gets stamped
+  onto a completion checkbox (see below) — still editable per row
+  afterward for correction.
+- **Completion fields are checkboxes that stamp the Report Date, not
+  free-typed dates** (2026-09-15, confirmed directly by the user):
+  Assembled, Welded, Coating, and Shipped were originally free-text date
+  cells; checking one now stamps it with the current Report Date, and
+  **unchecking an already-set one asks for confirmation first** ("this is
+  very critical" — undoing a completed step is meaningfully different from
+  fixing a typo). See `DoneDateCell`/`CoatingCell` in `PipeGrid.tsx`.
+- **Two fields (`repair_category`, `surface_state`) and the free-text
+  additional-part fields (`additional_part_name`, `additional_part_qty`)
+  were removed** (2026-09-15) — inherited from the original scaffold
+  (mirroring `dash_app`'s `pipe_repair_details` columns / an early guess at
+  additional-part tracking), confirmed directly by the user as never
+  actually used once asked what they were for. This also resolves the
+  "exact field names for the additional-part stages" open question from
+  section 8 below, by removing the field that question was about — only
+  the two completion checkboxes (Assembled, Welded) remain for that stage.
+  The DB columns are left in place, unused; `supabase/schema.sql` has an
+  optional, clearly-flagged destructive `DROP COLUMN` block for them.
+- **"Coating" is not a Features preset.** It used to be (confirmed against
+  the real Excel), but now that coating is its own formal lifecycle stage
+  (`requires_coating` / `coating_done` / the Awaiting Coating queue below),
+  also offering it as a free-form tag was confirmed confusing by the user
+  — two different "is this pipe getting coated" signals that could
+  disagree. `src/lib/pipeFeatures.ts`'s `PRESET_FEATURES` no longer
+  includes it; already-saved "Coating" tags on old rows still display and
+  are removable via `FeaturesPicker`'s custom-tag chips, just not
+  re-addable as a checkbox.
 
 ## 6. What the admin data-entry form must prevent
 
@@ -414,13 +468,27 @@ Build in this order, highest-value piece first:
      (default-yesterday) daily-entry date picker. See the new
      [section 5 subsection](#5-the-pipe-lifecycle-model) for the full
      reasoning on each.
-   - Still to do in this phase: numeric/date cell editors with real
-     validation instead of free-text (a "Repair Amt" that must be a
-     number, a real date picker instead of typing `YYYY-MM-DD`), a
-     bulk-paste-from-Excel path (the actual point of using a grid
-     library), and revisiting the free-text `additional_part_name` field
-     once the still-open Excel-cell-mapping question (section 8) has an
-     answer.
+   - Also done (2026-09-15): the Pipes page is now stage-queue tables
+     (Awaiting Repair / Additional Part / Coating / Shipment) instead of
+     one flat grid, with a Save button under every queue and a
+     project-wide summary-card row; completion fields (Assembled, Welded,
+     Coating, Shipped) are checkboxes that stamp the Report Date, with
+     confirmation before unchecking an already-completed one; a
+     `skelp_weld_count`-driven B.E. calculation; a per-pipe (not bulk)
+     group-required entry flow; a native + in-app "unsaved changes"
+     warning before leaving the page; removal of the never-used
+     `repair_category`/`surface_state`/`additional_part_name`/
+     `additional_part_qty` fields; and the whole UI translated to English
+     (the team converses with the assistant in Turkish, but the shipped
+     app is English-only). See the section 5 subsection above for the full
+     reasoning on each.
+   - Still to do in this phase: real numeric-typed cell editors (a "Repair
+     Amt" input that rejects non-numeric text inline, rather than a plain
+     text cell caught only at save time). The bulk-paste-from-Excel idea
+     from the original plan is likely **superseded** by the confirmed
+     per-pipe group-picker workflow above (pipe numbers are entered
+     sequentially, one at a time, as each is physically produced — not as
+     a batch paste) — revisit only if the user asks for it directly.
    Running alongside `dash_app` for viewing (per section 8, `dash_app`
    freezes at cutover rather than staying live), this phase alone already
    stops new Excel-entry errors from happening once it's the daily driver.
@@ -509,15 +577,38 @@ reasoning on each:
 - Added the "Rapor Tarihi" daily-entry date picker (defaults to yesterday,
   stamps new rows, stays editable per row).
 
+**Resolved (2026-09-15)** — see the section 5 subsection above for the full
+reasoning on each:
+
+- The per-pipe entry model requires a group; there is no "manual, no
+  group" pipe. Entry is one pipe per click (pick a group, **+ Add**), not
+  a bulk-quantity add — production order doesn't determine length ahead of
+  time.
+- `repair_amount_incl_skelp` is computed from a `skelp_weld_count` the
+  admin enters (`repair_amount + count * 1.5m`), not typed directly.
+- Assembled/Welded/Coating/Shipped are checkboxes that stamp the Report
+  Date, with a confirmation prompt before unchecking an already-completed
+  one.
+- A pipe only moves to its next stage-queue table once **Save** confirms
+  it with the server, never live while typing.
+- `repair_category`, `surface_state`, `additional_part_name`, and
+  `additional_part_qty` are confirmed unused and removed from the app —
+  this also **resolves** the previously-open "exact field names for the
+  additional-part stages" question below, by removing the field it was
+  about rather than answering it: only the two completion checkboxes
+  (Assembled, Welded) remain for that stage, no name/qty tracking.
+- "Coating" removed as a Features preset (it's a formal stage, not a tag).
+- The shipped app's UI is English-only (the team converses with the
+  assistant in Turkish; the product itself is not localized).
+
 **Still open — do not guess, ask the user directly:**
 
-- Exact field names for the additional-part assembly + weld stages, and
-  whether the raw Excel cells in the table in section 5 actually map onto
-  these stages the way hypothesized, or are genuinely separate data. Low
-  urgency: the new entry form doesn't need to parse Excel cells at all
-  (that only matters for the phase-6 historical-import module), so
-  `pipes.additional_part_name` is free text for now and can absorb
-  whatever the real answer turns out to be.
+- Whether the raw Excel cells noted in the table in section 5 (a physical
+  rack/position label, a short position code like `"E" BOT`) map onto
+  anything this app should capture, or are genuinely unrelated to the new
+  schema. Low urgency: the new entry form doesn't need to parse Excel
+  cells at all (that only matters for the phase-6 historical-import
+  module).
 
 ## 9. Reference material in this repo
 

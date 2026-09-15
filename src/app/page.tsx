@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { SummaryCard } from "@/components/SummaryCard";
 import { NewestPipesTable } from "@/components/NewestPipesTable";
 import {
@@ -36,7 +37,12 @@ export default async function Dashboard() {
     return (
       <main className="min-h-screen bg-slate-50 px-4 py-10 sm:px-8">
         <div className="mx-auto max-w-6xl">
-          <h1 className="text-2xl font-bold text-slate-900">Factory Tracker</h1>
+          <div className="flex items-center justify-between">
+            <h1 className="text-2xl font-bold text-slate-900">Factory Tracker</h1>
+            <Link href="/board" className="text-sm font-medium text-blue-600 hover:underline">
+              Project Board
+            </Link>
+          </div>
           <p className="mt-4 text-slate-500">No data yet.</p>
         </div>
       </main>
@@ -56,8 +62,15 @@ export default async function Dashboard() {
   return (
     <main className="min-h-screen bg-slate-50 px-4 py-10 sm:px-8">
       <div className="mx-auto max-w-6xl">
-        <h1 className="text-2xl font-bold text-slate-900">Factory Tracker</h1>
-        <p className="mt-1 text-sm text-slate-500">Overview / Dashboard</p>
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">Factory Tracker</h1>
+            <p className="mt-1 text-sm text-slate-500">Overview / Dashboard</p>
+          </div>
+          <Link href="/board" className="text-sm font-medium text-blue-600 hover:underline">
+            Project Board
+          </Link>
+        </div>
 
         <div className="mt-6 flex flex-wrap gap-4">
           <SummaryCard
