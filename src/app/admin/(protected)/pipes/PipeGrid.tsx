@@ -4,7 +4,7 @@ import { useState, useMemo, useEffect } from "react";
 import Link from "next/link";
 import { DataGrid, renderTextEditor, type Column, type RowsChangeData } from "react-data-grid";
 import "react-data-grid/lib/styles.css";
-import type { Pipe, PipeInput, ProjectStageConfig } from "@/lib/types";
+import type { Pipe, PipeInput, PipePartProgress, ProjectStageConfig } from "@/lib/types";
 import type { ProjectPipeGroupProgress } from "@/lib/pipes";
 import { formatDimensions, computeSpiralLengthM, computeRepairRatio } from "@/lib/pipes";
 import { FeaturesPicker } from "@/components/FeaturesPicker";
@@ -140,16 +140,27 @@ function rowToPipeInput(row: GridRow, projectNo: string): PipeInput | null {
 // up in the All Pipes table below, not in any queue.
 type Stage = "repair" | "additional_part" | "coating" | "ship" | "done";
 
+function partProgressKey(pipeId: string, feature: string): string {
+  return `${pipeId}::${feature}`;
+}
+
+// A pipe's additional-part stage is done either when the one shared
+// Assembled/Welded pair is set (the simple default), or -- when this
+// project has track_parts_separately on, see project_stage_config in
+// supabase/schema.sql -- once EVERY one of its features has its own
+// welded_date recorded in pipe_part_progress. A pipe with no features
+// vacuously has nothing left to track.
 function stageOf(
   row: GridRow,
-  config: Pick<ProjectStageConfig, "requires_additional_part" | "requires_coating">
+  config: Pick<ProjectStageConfig, "requires_additional_part" | "requires_coating" | "track_parts_separately">,
+  partProgressByKey?: Map<string, PipePartProgress>
 ): Stage {
   if (row.repair_amount.trim() === "") return "repair";
-  if (
-    config.requires_additional_part &&
-    !(row.additional_part_assembled_date.trim() !== "" && row.additional_part_welded_date.trim() !== "")
-  ) {
-    return "additional_part";
+  if (config.requires_additional_part) {
+    const additionalPartDone = config.track_parts_separately
+      ? row.features.every((f) => partProgressByKey?.get(partProgressKey(row.rowId, f))?.welded_date != null)
+      : row.additional_part_assembled_date.trim() !== "" && row.additional_part_welded_date.trim() !== "";
+    if (!additionalPartDone) return "additional_part";
   }
   if (config.requires_coating && !row.coating_done) return "coating";
   if (row.shipped_date.trim() === "") return "ship";
@@ -370,27 +381,113 @@ function StageSection({
   );
 }
 
+// Only rendered when config.track_parts_separately is on -- one row per
+// (pipe, feature) still awaiting its own weld, instead of the shared
+// Assembled/Welded columns StageSection normally shows. Each checkbox
+// saves immediately (a dedicated endpoint, /admin/api/pipe-part-progress
+// -- this data doesn't live on the pipes row the main Save button
+// submits), so there's no separate Save button here.
+function PartsChecklistSection({
+  rows,
+  partProgressByKey,
+  reportDate,
+  onToggle,
+}: {
+  rows: GridRow[];
+  partProgressByKey: Map<string, PipePartProgress>;
+  reportDate: string;
+  onToggle: (rowId: string, pipeNo: string, feature: string, field: "assembled_date" | "welded_date", value: string) => void;
+}) {
+  const items = rows.flatMap((row) =>
+    row.features
+      .filter((feature) => !partProgressByKey.get(partProgressKey(row.rowId, feature))?.welded_date)
+      .map((feature) => ({ row, feature }))
+  );
+  if (items.length === 0) return null;
+
+  return (
+    <div className="mb-5">
+      <h3 className="mb-2 text-sm font-semibold text-slate-700">Awaiting Additional Part</h3>
+      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500">
+            <tr>
+              <th className="px-3 py-2 text-left">Pipe No</th>
+              <th className="px-3 py-2 text-left">Feature</th>
+              <th className="px-3 py-2 text-center">Assembled</th>
+              <th className="px-3 py-2 text-center">Welded</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.map(({ row, feature }) => {
+              const progress = partProgressByKey.get(partProgressKey(row.rowId, feature));
+              return (
+                <tr key={`${row.rowId}-${feature}`} className="border-t border-slate-100">
+                  <td className="px-3 py-2 text-slate-700">{row.pipe_no}</td>
+                  <td className="px-3 py-2 text-slate-700">{feature}</td>
+                  <td className="px-3 py-2">
+                    <DoneDateCell
+                      value={progress?.assembled_date ?? ""}
+                      reportDate={reportDate}
+                      onChange={(v) => onToggle(row.rowId, row.pipe_no, feature, "assembled_date", v)}
+                      confirmMessage={`Remove the Assembled mark for ${feature} on pipe ${row.pipe_no}? This will also clear its date.`}
+                    />
+                  </td>
+                  <td className="px-3 py-2">
+                    <DoneDateCell
+                      value={progress?.welded_date ?? ""}
+                      reportDate={reportDate}
+                      onChange={(v) => onToggle(row.rowId, row.pipe_no, feature, "welded_date", v)}
+                      confirmMessage={`Remove the Welded mark for ${feature} on pipe ${row.pipe_no}? This will also clear its date.`}
+                    />
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-1.5 text-xs text-slate-500">
+        {items.length} item{items.length === 1 ? "" : "s"} awaiting per-feature assembly/weld
+      </p>
+    </div>
+  );
+}
+
 export function PipeGrid({
   projectNo,
   config,
   initialPipes,
+  initialPartProgress,
   groups,
 }: {
   projectNo: string;
   config: ProjectStageConfig;
   initialPipes: Pipe[];
+  initialPartProgress: PipePartProgress[];
   groups: ProjectPipeGroupProgress[];
 }) {
   const [rows, setRows] = useState<GridRow[]>(() => initialPipes.map(pipeToRow));
+  const [partProgress, setPartProgress] = useState<PipePartProgress[]>(initialPartProgress);
+  const partProgressByKey = useMemo(() => {
+    const map = new Map<string, PipePartProgress>();
+    for (const p of partProgress) map.set(partProgressKey(String(p.pipe_id), p.feature), p);
+    return map;
+  }, [partProgress]);
+
   // Which stage-queue section each row renders in -- deliberately NOT
   // recomputed on every keystroke (see mergeRows below): typing a Repair
   // Amt shouldn't yank the row out of Awaiting Repair before the admin
   // also gets to fill in Skelp Welds on the same row (confirmed directly
   // by the user -- this was the exact bug). A row only moves once Save
   // confirms the new state with the server.
-  const [stageAssignment, setStageAssignment] = useState<Record<string, Stage>>(() =>
-    Object.fromEntries(initialPipes.map((p) => [String(p.id), stageOf(pipeToRow(p), config)]))
-  );
+  const [stageAssignment, setStageAssignment] = useState<Record<string, Stage>>(() => {
+    const initialMap = new Map<string, PipePartProgress>();
+    for (const p of initialPartProgress) initialMap.set(partProgressKey(String(p.pipe_id), p.feature), p);
+    return Object.fromEntries(
+      initialPipes.map((p) => [String(p.id), stageOf(pipeToRow(p), config, initialMap)])
+    );
+  });
   const [saving, setSaving] = useState(false);
   const [warningsByRow, setWarningsByRow] = useState<Record<string, string[]>>({});
   const [errorsByRow, setErrorsByRow] = useState<Record<string, string[]>>({});
@@ -500,6 +597,51 @@ export function PipeGrid({
     setHasUnsavedChanges(true);
   }
 
+  // Saves one (pipe, feature)'s Assembled/Welded date immediately -- a
+  // dedicated endpoint since pipe_part_progress isn't part of the pipes
+  // row the main Save button submits. Refreshes this pipe's stage right
+  // after, since a per-feature save is already a real, confirmed write
+  // (not a pending edit), same "moves only once the server confirms it"
+  // rule as everywhere else on this page.
+  async function handlePartProgressToggle(
+    rowId: string,
+    pipeNo: string,
+    feature: string,
+    field: "assembled_date" | "welded_date",
+    value: string
+  ) {
+    const pipeId = Number(rowId);
+    if (!Number.isFinite(pipeId)) return; // only already-saved pipes reach this section
+    const existing = partProgressByKey.get(partProgressKey(rowId, feature));
+    const nextFields = {
+      assembled_date: field === "assembled_date" ? value || null : (existing?.assembled_date ?? null),
+      welded_date: field === "welded_date" ? value || null : (existing?.welded_date ?? null),
+    };
+
+    try {
+      const res = await fetch("/admin/api/pipe-part-progress", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pipe_id: pipeId, feature, ...nextFields }),
+      });
+      if (!res.ok) throw new Error(`Save failed: ${res.status}`);
+      const { progress }: { progress: PipePartProgress } = await res.json();
+
+      setPartProgress((prev) => [...prev.filter((p) => !(p.pipe_id === pipeId && p.feature === feature)), progress]);
+
+      const row = rows.find((r) => r.rowId === rowId);
+      if (row) {
+        const updatedMap = new Map(partProgressByKey);
+        updatedMap.set(partProgressKey(rowId, feature), progress);
+        setStageAssignment((prev) => ({ ...prev, [rowId]: stageOf(row, config, updatedMap) }));
+      }
+    } catch (err) {
+      setSaveError(
+        `Pipe ${pipeNo} (${feature}): ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+  }
+
   async function handleSave() {
     setSaving(true);
     setSaveError(null);
@@ -533,7 +675,7 @@ export function PipeGrid({
           if (idx !== -1) nextRows[idx] = savedRow;
           // This is the one moment a row is allowed to move to its next
           // stage-queue section -- confirmed and saved, not mid-edit.
-          nextStages[rowId] = stageOf(savedRow, config);
+          nextStages[rowId] = stageOf(savedRow, config, partProgressByKey);
         } else {
           nextErrors[rowId] = [r.error ?? "Unknown error"];
         }
@@ -561,26 +703,26 @@ export function PipeGrid({
   // sections mid-edit, before every field for its current stage is filled
   // in and saved).
   const repairRows = useMemo(
-    () => rows.filter((r) => (stageAssignment[r.rowId] ?? stageOf(r, config)) === "repair"),
-    [rows, stageAssignment, config]
+    () => rows.filter((r) => (stageAssignment[r.rowId] ?? stageOf(r, config, partProgressByKey)) === "repair"),
+    [rows, stageAssignment, config, partProgressByKey]
   );
   const additionalPartRows = useMemo(
     () =>
       config.requires_additional_part
-        ? rows.filter((r) => (stageAssignment[r.rowId] ?? stageOf(r, config)) === "additional_part")
+        ? rows.filter((r) => (stageAssignment[r.rowId] ?? stageOf(r, config, partProgressByKey)) === "additional_part")
         : [],
-    [rows, stageAssignment, config]
+    [rows, stageAssignment, config, partProgressByKey]
   );
   const coatingRows = useMemo(
     () =>
       config.requires_coating
-        ? rows.filter((r) => (stageAssignment[r.rowId] ?? stageOf(r, config)) === "coating")
+        ? rows.filter((r) => (stageAssignment[r.rowId] ?? stageOf(r, config, partProgressByKey)) === "coating")
         : [],
-    [rows, stageAssignment, config]
+    [rows, stageAssignment, config, partProgressByKey]
   );
   const shipRows = useMemo(
-    () => rows.filter((r) => (stageAssignment[r.rowId] ?? stageOf(r, config)) === "ship"),
-    [rows, stageAssignment, config]
+    () => rows.filter((r) => (stageAssignment[r.rowId] ?? stageOf(r, config, partProgressByKey)) === "ship"),
+    [rows, stageAssignment, config, partProgressByKey]
   );
 
   // Project-wide roll-up (Produced/Repaired/Shipped counts, an overall
@@ -907,15 +1049,24 @@ export function PipeGrid({
         onSave={handleSave}
         saving={saving}
       />
-      <StageSection
-        title="Awaiting Additional Part"
-        summary={`${additionalPartRows.length} pipe${additionalPartRows.length === 1 ? "" : "s"} awaiting additional part`}
-        rows={additionalPartRows}
-        columns={additionalPartColumns}
-        onRowsChange={mergeRows}
-        onSave={handleSave}
-        saving={saving}
-      />
+      {config.track_parts_separately ? (
+        <PartsChecklistSection
+          rows={additionalPartRows}
+          partProgressByKey={partProgressByKey}
+          reportDate={reportDate}
+          onToggle={handlePartProgressToggle}
+        />
+      ) : (
+        <StageSection
+          title="Awaiting Additional Part"
+          summary={`${additionalPartRows.length} pipe${additionalPartRows.length === 1 ? "" : "s"} awaiting additional part`}
+          rows={additionalPartRows}
+          columns={additionalPartColumns}
+          onRowsChange={mergeRows}
+          onSave={handleSave}
+          saving={saving}
+        />
+      )}
       <StageSection
         title="Awaiting Coating"
         summary={`${coatingRows.length} pipe${coatingRows.length === 1 ? "" : "s"} awaiting coating`}

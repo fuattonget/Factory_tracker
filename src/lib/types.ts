@@ -26,6 +26,9 @@ export interface ProjectStageConfig {
   // listProjectStageConfigs / setProjectStageConfigArchived in lib/pipes.ts.
   archived: boolean;
   requires_additional_part: boolean;
+  // Only meaningful when requires_additional_part is true -- see the
+  // track_parts_separately comment in supabase/schema.sql.
+  track_parts_separately: boolean;
   requires_coating: boolean;
   notes: string | null;
   updated_at: string;
@@ -117,3 +120,16 @@ export type PipeInput = Omit<
   | "repair_ratio_incl_skelp"
   | "repair_amount_incl_skelp"
 >;
+
+// Per-(pipe, feature) assembly/weld progress -- only read/written when
+// that pipe's project has ProjectStageConfig.track_parts_separately =
+// true. See the pipe_part_progress comment in supabase/schema.sql.
+export interface PipePartProgress {
+  id: number;
+  pipe_id: number;
+  feature: string;
+  assembled_date: string | null;
+  welded_date: string | null;
+  created_at: string;
+  updated_at: string;
+}

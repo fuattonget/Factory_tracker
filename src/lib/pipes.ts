@@ -3,6 +3,7 @@ import { METERS_PER_FOOT } from "@/lib/units";
 import type {
   Pipe,
   PipeInput,
+  PipePartProgress,
   ProjectPipeGroup,
   ProjectPipeGroupInput,
   ProjectStageConfig,
@@ -151,6 +152,52 @@ export async function listPipes(project_no?: string): Promise<Pipe[]> {
   let query = supabase.from("pipes").select("*").order("pipe_no");
   if (project_no) query = query.eq("project_no", project_no);
   const { data, error } = await query;
+  if (error) throw error;
+  return data;
+}
+
+// --- pipe_part_progress -----------------------------------------------------
+// Per-(pipe, feature) assembly/weld progress -- only meaningful when the
+// pipe's project has track_parts_separately = true (see the schema.sql
+// comment); ignored otherwise, where the shared
+// pipes.additional_part_assembled_date/welded_date pair is the source of
+// truth for the whole pipe. Confirmed directly by the user: some projects
+// need each feature (Clutch, Back-Up Ring, etc.) tracked independently
+// (e.g. Clutch welded but Back-Up Ring only assembled, on the same pipe,
+// at the same time) -- others don't, hence the per-project toggle.
+
+export async function listPipePartProgressForProject(project_no: string): Promise<PipePartProgress[]> {
+  const supabase = createServiceRoleClient();
+  const { data: pipes, error: pipesError } = await supabase
+    .from("pipes")
+    .select("id")
+    .eq("project_no", project_no);
+  if (pipesError) throw pipesError;
+  const pipeIds = (pipes ?? []).map((p) => p.id);
+  if (pipeIds.length === 0) return [];
+
+  const { data, error } = await supabase
+    .from("pipe_part_progress")
+    .select("*")
+    .in("pipe_id", pipeIds);
+  if (error) throw error;
+  return data;
+}
+
+export async function upsertPipePartProgress(
+  pipe_id: number,
+  feature: string,
+  fields: { assembled_date: string | null; welded_date: string | null }
+): Promise<PipePartProgress> {
+  const supabase = createServiceRoleClient();
+  const { data, error } = await supabase
+    .from("pipe_part_progress")
+    .upsert(
+      { pipe_id, feature, ...fields, updated_at: new Date().toISOString() },
+      { onConflict: "pipe_id,feature" }
+    )
+    .select()
+    .single();
   if (error) throw error;
   return data;
 }

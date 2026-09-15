@@ -1,5 +1,10 @@
 import Link from "next/link";
-import { listProjectStageConfigs, listPipes } from "@/lib/pipes";
+import {
+  listProjectStageConfigs,
+  listPipes,
+  listProjectPipeGroups,
+  listPipePartProgressForProject,
+} from "@/lib/pipes";
 import { buildProjectBoard } from "@/lib/board";
 import { PipeTileCard } from "@/components/PipeTileCard";
 
@@ -19,8 +24,14 @@ export default async function BoardPage() {
   const configs = await listProjectStageConfigs();
   const boards = await Promise.all(
     configs.map(async (config) => {
-      const pipes = await listPipes(config.project_no);
-      return buildProjectBoard(config, pipes);
+      const [pipes, groups, partProgress] = await Promise.all([
+        listPipes(config.project_no),
+        listProjectPipeGroups(config.project_no),
+        config.requires_additional_part
+          ? listPipePartProgressForProject(config.project_no)
+          : Promise.resolve([]),
+      ]);
+      return buildProjectBoard(config, pipes, groups, partProgress);
     })
   );
   const nonEmptyBoards = boards.filter((b) => b.tiles.length > 0);
@@ -60,8 +71,8 @@ export default async function BoardPage() {
                 </div>
 
                 <div className="mt-4 grid grid-cols-4 gap-2 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10">
-                  {board.tiles.map((tile) => (
-                    <PipeTileCard key={tile.pipe_no} tile={tile} />
+                  {board.tiles.map((tile, i) => (
+                    <PipeTileCard key={tile.kind === "pipe" ? `pipe-${tile.pipe_no}` : `planned-${i}`} tile={tile} />
                   ))}
                 </div>
 

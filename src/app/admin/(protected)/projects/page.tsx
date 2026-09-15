@@ -170,6 +170,10 @@ export default async function ProjectsPage({
             <input type="checkbox" name="requires_additional_part" className="h-4 w-4 rounded border-slate-300 accent-blue-600" />
             This project has an additional part (assembly + weld)
           </label>
+          <label className="flex items-center gap-2 pl-6 text-sm text-slate-500 sm:col-span-2">
+            <input type="checkbox" name="track_parts_separately" className="h-4 w-4 rounded border-slate-300 accent-blue-600" />
+            Track each feature (Clutch, Back-Up Ring, etc.) separately — only applies if the box above is checked
+          </label>
           <label className="flex items-center gap-2 text-sm text-slate-600 sm:col-span-2">
             <input type="checkbox" name="requires_coating" className="h-4 w-4 rounded border-slate-300 accent-blue-600" />
             This project has coating

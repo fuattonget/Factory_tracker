@@ -1,43 +1,102 @@
-import type { PipeTile } from "@/lib/board";
+import type { BoardTile, FeatureState } from "@/lib/board";
+import { STATUS } from "@/lib/palette";
 
-const BAND_STYLE: Record<NonNullable<PipeTile["band"]>, string> = {
-  Coating: "bg-blue-100 text-blue-700",
-  "Shipped Bare": "bg-red-100 text-red-800",
+// Two independent, status-only colors ("done"/"in_progress") -- see the
+// FeatureState doc in lib/board.ts for why "pending" isn't one of them
+// (it borrows the tile's own group color instead, so an untouched
+// feature reads as identity, not alarm).
+const FEATURE_STATE_COLOR: Record<Exclude<FeatureState, "pending">, string> = {
+  done: STATUS.good,
+  in_progress: STATUS.critical,
 };
 
-// One pipe, as a colored status tile -- see PROJECT_PLAN.md section 5's
-// "screenshot" description this ports: pipe number colored red (not yet
-// repaired) or green (repaired), a repair-rate label, an optional colored
-// category band ("Coating" / "Shipped Bare"), and the length. A plain
-// tile with no band can still have shipped -- Shipped is tracked
-// independently of the Coating/Shipped-Bare distinction (confirmed
-// directly by the user), so it gets its own small marker when there's no
-// band to carry it.
-export function PipeTileCard({ tile }: { tile: PipeTile }) {
-  const colorClasses = tile.repaired
-    ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-    : "border-red-200 bg-red-50 text-red-700";
+function FeatureCell({ feature, state, groupColor }: { feature: string; state: FeatureState; groupColor: string }) {
+  const bg = state === "pending" ? groupColor : FEATURE_STATE_COLOR[state];
+  return (
+    <div
+      className="flex-1 truncate px-1 py-0.5 text-center text-[9px] font-bold text-white"
+      style={{ backgroundColor: bg }}
+      title={feature}
+    >
+      {feature}
+    </div>
+  );
+}
+
+// One pipe (or one still-planned slot), as a status tile -- ports
+// PROJECT_PLAN.md section 5's "screenshot" description and several real
+// Excel examples shown directly by the user. Three independent color
+// channels, deliberately kept separate rather than collapsed into one:
+//   - groupColor (categorical, see lib/palette.ts): which planned batch
+//     this pipe belongs to -- the header bar and left border.
+//   - feature-band colors (status): each feature's own assembly progress.
+//   - the big pipe number (status): repair progress -- red until a
+//     repair amount is recorded, green after.
+// Shipped pipes get a yellow tile body (confirmed directly by the user,
+// "shipleri sarı ile gösteriyoruz") -- independent of both of the above.
+// A still-planned pipe (not yet produced) renders the same template with
+// the number/amount left blank (confirmed directly by the user) -- the
+// header and feature band still show, since those describe the *plan*,
+// not this specific unit's progress.
+export function PipeTileCard({ tile }: { tile: BoardTile }) {
+  const isPlanned = tile.kind === "planned";
+  const repaired = tile.kind === "pipe" && tile.repaired;
+  const numberColor = repaired ? STATUS.good : STATUS.critical;
+  const bodyBg = tile.kind === "pipe" && tile.shipped ? "#fff7cc" : "#ffffff"; // pale yellow when shipped
 
   return (
-    <div className={`flex flex-col items-center rounded-xl border p-2.5 ${colorClasses}`}>
-      <span className="text-lg font-bold tabular-nums">{tile.pipe_no}</span>
-      <span className="text-xs font-medium tabular-nums">
-        {tile.repair_ratio != null ? `${(tile.repair_ratio * 100).toFixed(2)}%` : "0.00%"}
-      </span>
-      {tile.band && (
-        <span className={`mt-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${BAND_STYLE[tile.band]}`}>
-          {tile.band}
+    <div className="overflow-hidden rounded-lg border text-center" style={{ borderColor: tile.groupColor }}>
+      <div
+        className="px-1.5 py-1 text-[10px] font-semibold text-slate-900"
+        style={{ backgroundColor: `${tile.groupColor}26` /* ~15% tint, keeps text readable */ }}
+      >
+        Repair Rate:{" "}
+        <span className="tabular-nums">
+          {tile.kind === "pipe" && tile.repair_ratio != null ? `${(tile.repair_ratio * 100).toFixed(2)}%` : "0.00%"}
         </span>
+      </div>
+
+      {tile.features.length > 0 && (
+        <div className="flex border-t border-black/10">
+          {tile.features.map((f) => (
+            <FeatureCell key={f.feature} feature={f.feature} state={f.state} groupColor={tile.groupColor} />
+          ))}
+        </div>
       )}
-      {!tile.band && tile.shipped && (
-        <span className="mt-1 rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
-          Shipped
+
+      <div className="flex border-t border-black/10">
+        <div
+          className="flex w-4 shrink-0 items-center justify-center text-[9px] font-semibold text-slate-500"
+          style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}
+        >
+          {tile.pipe_length_ft != null ? `${tile.pipe_length_ft} ft` : ""}
+        </div>
+        <div className="flex flex-1 items-center justify-center py-2" style={{ backgroundColor: bodyBg }}>
+          {!isPlanned && tile.kind === "pipe" && (
+            <span className="text-2xl font-bold tabular-nums" style={{ color: numberColor }}>
+              {tile.pipe_no}
+            </span>
+          )}
+        </div>
+      </div>
+
+      <div
+        className="flex items-center justify-between border-t border-black/10 px-1.5 py-1 text-[10px]"
+        style={{ backgroundColor: bodyBg }}
+      >
+        <span className="font-semibold tabular-nums" style={{ color: repaired ? STATUS.good : "#94a3b8" }}>
+          {tile.kind === "pipe" ? (tile.repair_amount_incl_skelp_m ?? 0).toFixed(2) : ""}{" "}m.
         </span>
-      )}
-      {tile.pipe_length_ft != null && (
-        <span className="mt-1 text-[10px] text-slate-500">
-          {tile.pipe_length_ft} ft ({tile.pipe_length_m?.toFixed(1)} m)
-        </span>
+        <span className="font-medium text-slate-500">B.E</span>
+      </div>
+
+      {tile.kind === "pipe" && tile.band && (
+        <div
+          className="py-0.5 text-[9px] font-bold text-white"
+          style={{ backgroundColor: tile.band === "Coating" ? "#2a78d6" : STATUS.warning }}
+        >
+          {tile.band === "Coating" ? "COATING" : "SHIPPED BARE"}
+        </div>
       )}
     </div>
   );

@@ -36,6 +36,7 @@ export async function saveProjectStageConfig(formData: FormData) {
     customer_name: strOrNull(formData.get("customer_name")),
     archived: existing?.archived ?? false,
     requires_additional_part: formData.get("requires_additional_part") === "on",
+    track_parts_separately: formData.get("track_parts_separately") === "on",
     requires_coating: formData.get("requires_coating") === "on",
     notes: strOrNull(formData.get("notes")),
   });

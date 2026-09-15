@@ -39,6 +39,18 @@ create table if not exists project_stage_config (
     -- src/lib/pipes.ts.
     archived boolean not null default false,
     requires_additional_part boolean not null default false,
+    -- Only meaningful when requires_additional_part is true. Off by
+    -- default (a pipe's whole additional-part stage shares one
+    -- Assembled/Welded date pair, pipes.additional_part_assembled_date/
+    -- welded_date -- fine when a pipe only ever has one additional part).
+    -- Confirmed directly by the user: some real projects need each
+    -- feature (Clutch, Back-Up Ring, etc.) tracked as independently
+    -- assembled/welded -- e.g. Clutch welded but Back-Up Ring still only
+    -- assembled, on the same pipe, at the same time. When true, per-
+    -- feature progress lives in pipe_part_progress instead. See
+    -- computeAdditionalPartDone/PipeGrid.tsx's Awaiting Additional Part
+    -- section for how the two modes render differently.
+    track_parts_separately boolean not null default false,
     requires_coating boolean not null default false,
     notes text,
     updated_at timestamptz not null default now()
@@ -144,6 +156,23 @@ create table if not exists pipes (
     unique (project_no, pipe_no)
 );
 
+-- Per-(pipe, feature) assembly/weld progress -- only used when that pipe's
+-- project has project_stage_config.track_parts_separately = true; ignored
+-- otherwise (the shared pipes.additional_part_assembled_date/welded_date
+-- pair covers the simple case). `feature` is free text, same values as
+-- pipes.features (e.g. "Clutch", "C. Shoe") -- not a foreign key into
+-- anything since features are themselves just tags, not a fixed enum.
+create table if not exists pipe_part_progress (
+    id bigint generated always as identity primary key,
+    pipe_id bigint not null references pipes(id) on delete cascade,
+    feature text not null,
+    assembled_date date,
+    welded_date date,
+    created_at timestamptz not null default now(),
+    updated_at timestamptz not null default now(),
+    unique (pipe_id, feature)
+);
+
 -- RLS stays enabled by default, same model as dash_app: the Next.js server
 -- (Server Components / Route Handlers / Server Actions) connects with the
 -- service_role key, which bypasses RLS automatically — no client ever
@@ -153,6 +182,7 @@ create table if not exists pipes (
 alter table project_stage_config enable row level security;
 alter table project_pipe_groups enable row level security;
 alter table pipes enable row level security;
+alter table pipe_part_progress enable row level security;
 
 -- ---------------------------------------------------------------------------
 -- MIGRATION for the already-live tables above (the `create table if not
@@ -193,3 +223,11 @@ alter table pipes enable row level security;
 -- alter table pipes drop column if exists surface_state;
 -- alter table pipes drop column if exists additional_part_name;
 -- alter table pipes drop column if exists additional_part_qty;
+
+-- ---------------------------------------------------------------------------
+-- Per-feature assembly/weld tracking (2026-09-15) -- run this block once,
+-- by hand, in the SQL Editor. pipe_part_progress is a brand-new table --
+-- the uncommented `create table if not exists pipe_part_progress` above
+-- already handles creating it on the live DB too.
+-- ---------------------------------------------------------------------------
+-- alter table project_stage_config add column if not exists track_parts_separately boolean not null default false;
